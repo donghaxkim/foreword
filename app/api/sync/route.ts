@@ -102,11 +102,14 @@ async function fetchLinearShips(apiKey: string): Promise<string> {
     }
   `;
 
+  // Personal API keys (lin_api_*) work bare; OAuth tokens need Bearer prefix
+  const authHeader = apiKey.startsWith("lin_") ? apiKey : `Bearer ${apiKey}`;
+
   const res = await fetch("https://api.linear.app/graphql", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: apiKey
+      Authorization: authHeader
     },
     body: JSON.stringify({ query })
   });
@@ -118,7 +121,7 @@ async function fetchLinearShips(apiKey: string): Promise<string> {
   }
 
   const json = (await res.json()) as {
-    data?: { issues?: { nodes?: Array<{ title: string; state?: { name: string } }> };
+    data?: { issues?: { nodes?: Array<{ title: string; state?: { name: string } }> } };
     errors?: Array<{ message: string }>;
   };
 

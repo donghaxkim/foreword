@@ -28,13 +28,13 @@ Audience: ${vibeFocus}`;
 
 export async function POST(request: NextRequest) {
   try {
-    const apiKey = process.env.OPENAI_API_KEY;
+    const { prompt, vibe, isManual, systemPersona, openaiApiKey } = await request.json();
+
+    const apiKey = process.env.OPENAI_API_KEY || openaiApiKey;
     if (!apiKey) {
       console.error("[Foreword] Missing API Key");
-      return NextResponse.json({ error: "OpenAI Key not configured" }, { status: 500 });
+      return NextResponse.json({ error: "OpenAI Key not configured. Add it to .env or in Settings." }, { status: 500 });
     }
-
-    const { prompt, vibe, isManual, systemPersona } = await request.json();
 
     if (!prompt || !vibe) {
       return NextResponse.json({ error: "Prompt and Vibe are required" }, { status: 400 });
