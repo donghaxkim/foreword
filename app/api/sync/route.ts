@@ -106,26 +106,43 @@ async function fetchGitHubContent(apiKey: string, days: number): Promise<string>
 
   const octokit = new Octokit({ auth: apiKey });
 
-  // Fetch merged PRs and commits in parallel
-  const [pullsRes, commitsRes] = await Promise.all([
-    octokit.rest.pulls.list({
-      owner,
-      repo,
-      state: "closed",
-      sort: "updated",
-      direction: "desc",
-      per_page: 100
-    }),
-    octokit.rest.repos.listCommits({
-      owner,
-      repo,
-      since: sinceIso,
-      per_page: 100
-    })
-  ]);
+  let pulls: Awaited<ReturnType<Octokit["rest"]["pulls"]["list"]>>["data"];
+  let commits: Awaited<ReturnType<Octokit["rest"]["repos"]["listCommits"]>>["data"];
 
-  const pulls = pullsRes.data;
-  const commits = commitsRes.data;
+  try {
+    const [pullsRes, commitsRes] = await Promise.all([
+      octokit.rest.pulls.list({
+        owner,
+        repo,
+        state: "closed",
+        sort: "updated",
+        direction: "desc",
+        per_page: 100
+      }),
+      octokit.rest.repos.listCommits({
+        owner,
+        repo,
+        since: sinceIso,
+        per_page: 100
+      })
+    ]);
+    pulls = pullsRes.data;
+    commits = commitsRes.data;
+  } catch (err: unknown) {
+    const status = (err as { status?: number })?.status;
+    if (status === 404) {
+      throw new Error(
+        `GitHub: Repository "${CADDY_REPO}" not found or you don't have access. Set GITHUB_CADDY_REPO to your repo (e.g. your-org/your-repo) and use a token that can read that repo.`
+      );
+    }
+    if (status === 401) {
+      throw new Error("GitHub: Unauthorized. Check that your token is valid and not expired.");
+    }
+    if (status === 403) {
+      throw new Error("GitHub: Forbidden. Your token may not have permission to read this repo.");
+    }
+    throw new Error(`GitHub: ${(err as Error)?.message ?? "Request failed"}`);
+  }
 
   const prLines = pulls
     .filter(
@@ -167,7 +184,7 @@ async function fetchLinearContent(apiKey: string, days: number): Promise<string>
   const dayLabel = days === 1 ? "last day" : `last ${days} days`;
 
   const query = `
-    query SyncDoneIssues($since: DateTime!) {
+    query SyncDoneIssues($since: DateTimeOrDuration!) {
       issues(
         filter: {
           or: [
