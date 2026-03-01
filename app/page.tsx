@@ -1,7 +1,7 @@
 "use client";
 
 import { MessageSquarePlus, Settings } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { AnimatedMesh } from "./components/AnimatedMesh";
 import { ChatbotIsland } from "./components/ChatbotIsland";
@@ -32,6 +32,10 @@ export default function Home() {
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>("default");
   const [githubToken, setGithubToken] = useState("");
   const [linearApiKey, setLinearApiKey] = useState("");
+  const [githubVerified, setGithubVerified] = useState<boolean | null>(null);
+  const [linearVerified, setLinearVerified] = useState<boolean | null>(null);
+  const githubVerifyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const linearVerifyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [loopsConfigured, setLoopsConfigured] = useState(false);
   const [loopsDefaultRecipient, setLoopsDefaultRecipient] = useState("");
   const [draft, setDraft] = useState<{ subject: string; preheader: string; body: string } | null>(null);
@@ -40,9 +44,14 @@ export default function Home() {
   const [copySuccess, setCopySuccess] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [lastSyncedGithubContent, setLastSyncedGithubContent] = useState("");
+  const [lastSyncedLinearContent, setLastSyncedLinearContent] = useState("");
   const [sendLoading, setSendLoading] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [sendSuccess, setSendSuccess] = useState(false);
+  const [directShipLoading, setDirectShipLoading] = useState(false);
+  const [directShipError, setDirectShipError] = useState<string | null>(null);
+  const [directShipSuccess, setDirectShipSuccess] = useState(false);
 
   // Handle post-OAuth redirect: open settings and clean URL
   useEffect(() => {
@@ -78,6 +87,54 @@ export default function Home() {
     if (linear != null) setLinearApiKey(linear);
   }, []);
 
+  // Verify GitHub token when it changes
+  useEffect(() => {
+    if (!githubToken.trim()) {
+      setGithubVerified(false);
+      return;
+    }
+    setGithubVerified(null);
+    if (githubVerifyTimeoutRef.current) clearTimeout(githubVerifyTimeoutRef.current);
+    githubVerifyTimeoutRef.current = setTimeout(() => {
+      githubVerifyTimeoutRef.current = null;
+      fetch("/api/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ integration: "github", apiKey: githubToken.trim() })
+      })
+        .then((res) => res.json())
+        .then((data: { valid?: boolean }) => setGithubVerified(!!data?.valid))
+        .catch(() => setGithubVerified(false));
+    }, 600);
+    return () => {
+      if (githubVerifyTimeoutRef.current) clearTimeout(githubVerifyTimeoutRef.current);
+    };
+  }, [githubToken]);
+
+  // Verify Linear token when it changes
+  useEffect(() => {
+    if (!linearApiKey.trim()) {
+      setLinearVerified(false);
+      return;
+    }
+    setLinearVerified(null);
+    if (linearVerifyTimeoutRef.current) clearTimeout(linearVerifyTimeoutRef.current);
+    linearVerifyTimeoutRef.current = setTimeout(() => {
+      linearVerifyTimeoutRef.current = null;
+      fetch("/api/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ integration: "linear", apiKey: linearApiKey.trim() })
+      })
+        .then((res) => res.json())
+        .then((data: { valid?: boolean }) => setLinearVerified(!!data?.valid))
+        .catch(() => setLinearVerified(false));
+    }, 600);
+    return () => {
+      if (linearVerifyTimeoutRef.current) clearTimeout(linearVerifyTimeoutRef.current);
+    };
+  }, [linearApiKey]);
+
   // Fetch server config (Loops availability and default recipient)
   useEffect(() => {
     fetch("/api/config")
@@ -96,7 +153,6 @@ export default function Home() {
       return;
     }
 
-    const integration = activeMode === "GitHub" ? "github" : "linear";
     const apiKey = activeMode === "GitHub" ? githubToken : linearApiKey;
 
     if (!apiKey) {
@@ -119,16 +175,35 @@ export default function Home() {
     fetch("/api/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ integration, apiKey })
+      body: JSON.stringify({
+        githubApiKey: githubToken || undefined,
+        linearApiKey: linearApiKey || undefined
+      })
     })
       .then(async (res) => {
         if (cancelled) return;
-        const data = await res.json();
+        const data = await res.json() as {
+          githubContent?: string;
+          linearContent?: string;
+          error?: string;
+          githubError?: string;
+          linearError?: string;
+        };
         if (!res.ok) {
           setSyncError(data?.error ?? "Sync failed");
           return;
         }
-        setInputValue(data.ships);
+        setLastSyncedGithubContent(data.githubContent ?? "");
+        setLastSyncedLinearContent(data.linearContent ?? "");
+        const content =
+          activeMode === "GitHub"
+            ? (data.githubContent ?? "")
+            : activeMode === "Linear"
+              ? (data.linearContent ?? "")
+              : "";
+        setInputValue(content);
+        if (activeMode === "GitHub" && data.githubError) setSyncError(data.githubError);
+        else if (activeMode === "Linear" && data.linearError) setSyncError(data.linearError);
       })
       .catch(() => {
         if (!cancelled) setSyncError("Sync failed — check your connection and try again.");
@@ -190,12 +265,15 @@ export default function Home() {
     setGenerateLoading(true);
     setSendSuccess(false);
     setSendError(null);
+    setDirectShipSuccess(false);
+    setDirectShipError(null);
     try {
       const vibe = mapSuggestionToVibe(selectedSuggestion);
       const body: Record<string, unknown> = {
-        prompt: value,
-        vibe,
-        isManual: activeMode === "Manual"
+        manualNotes: value,
+        githubData: lastSyncedGithubContent ?? "",
+        linearData: lastSyncedLinearContent ?? "",
+        vibe
       };
       if (activePersonaContent) body.systemPersona = activePersonaContent;
       const res = await fetch("/api/generate", {
@@ -225,6 +303,8 @@ export default function Home() {
     setGenerateError(null);
     setSendSuccess(false);
     setSendError(null);
+    setDirectShipSuccess(false);
+    setDirectShipError(null);
   };
 
   // Phase 3: Suggestion chips seed the textarea
@@ -247,6 +327,13 @@ export default function Home() {
     }
   };
 
+  const vibeToTargetGroup = (vibe: string): string => {
+    const lower = vibe.toLowerCase();
+    if (lower.includes("investor")) return "investors";
+    if (lower.includes("beta") || lower.includes("tester")) return "private-beta";
+    return "general";
+  };
+
   // Phase 4: Loops send handler (uses server-side Loops config)
   const handleSendViaLoops = async (recipientEmail: string) => {
     if (!draft || !recipientEmail) return;
@@ -254,6 +341,8 @@ export default function Home() {
     setSendError(null);
     setSendSuccess(false);
     try {
+      const vibe = mapSuggestionToVibe(selectedSuggestion);
+      const targetGroup = vibeToTargetGroup(vibe);
       const res = await fetch("/api/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -261,7 +350,8 @@ export default function Home() {
           subject: draft.subject,
           preheader: draft.preheader,
           htmlBody: draft.body,
-          recipientEmail
+          recipientEmail,
+          targetGroup
         })
       });
       if (!res.ok) {
@@ -270,11 +360,60 @@ export default function Home() {
         return;
       }
       setSendSuccess(true);
-      setTimeout(() => setSendSuccess(false), 3000);
+      setTimeout(() => {
+        setDraft(null);
+        setHasStartedConversation(false);
+        setFirstUserMessage(null);
+        setSendSuccess(false);
+      }, 2500);
     } catch {
       setSendError("Failed to send via Loops");
     } finally {
       setSendLoading(false);
+    }
+  };
+
+  const vibeToGroupLabel = (vibe: string): string => {
+    const lower = vibe.toLowerCase();
+    if (lower.includes("investor")) return "Investors";
+    if (lower.includes("beta") || lower.includes("tester")) return "Private Beta";
+    return "General";
+  };
+
+  const handleDirectShip = async () => {
+    if (!draft) return;
+    setDirectShipLoading(true);
+    setDirectShipError(null);
+    setDirectShipSuccess(false);
+    try {
+      const vibe = mapSuggestionToVibe(selectedSuggestion);
+      const targetGroup = vibeToTargetGroup(vibe);
+      const res = await fetch("/api/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: draft.subject,
+          preheader: draft.preheader,
+          htmlBody: draft.body,
+          targetGroup
+        })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setDirectShipError(data?.error ?? "Failed to broadcast via Loops");
+        return;
+      }
+      setDirectShipSuccess(true);
+      setTimeout(() => {
+        setDraft(null);
+        setHasStartedConversation(false);
+        setFirstUserMessage(null);
+        setDirectShipSuccess(false);
+      }, 2500);
+    } catch {
+      setDirectShipError("Failed to broadcast via Loops");
+    } finally {
+      setDirectShipLoading(false);
     }
   };
 
@@ -329,6 +468,8 @@ export default function Home() {
         onGithubTokenChange={(v) => { setGithubToken(v); persist(GITHUB_TOKEN_STORAGE_KEY, v); }}
         linearApiKey={linearApiKey}
         onLinearApiKeyChange={(v) => { setLinearApiKey(v); persist(LINEAR_API_KEY_STORAGE_KEY, v); }}
+        githubVerified={githubVerified}
+        linearVerified={linearVerified}
       />
 
       {/* Main chat column */}
@@ -392,6 +533,11 @@ export default function Home() {
                   sendLoading={sendLoading}
                   sendError={sendError}
                   sendSuccess={sendSuccess}
+                  targetGroupLabel={vibeToGroupLabel(mapSuggestionToVibe(selectedSuggestion))}
+                  onDirectShip={handleDirectShip}
+                  directShipLoading={directShipLoading}
+                  directShipError={directShipError}
+                  directShipSuccess={directShipSuccess}
                 />
               </div>
             </div>

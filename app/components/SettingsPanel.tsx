@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, ExternalLink } from "lucide-react";
+import { Check, ExternalLink, Loader2, XCircle } from "lucide-react";
 import type { Persona } from "./types";
 
 const githubOAuthAvailable = !!process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID;
@@ -20,6 +20,8 @@ type SettingsPanelProps = {
   onGithubTokenChange: (v: string) => void;
   linearApiKey: string;
   onLinearApiKeyChange: (v: string) => void;
+  githubVerified?: boolean | null;
+  linearVerified?: boolean | null;
 };
 
 function IntegrationBlock({
@@ -29,7 +31,8 @@ function IntegrationBlock({
   oauthAvailable,
   oauthUrl,
   placeholder,
-  envHint
+  envHint,
+  verified = null
 }: {
   label: string;
   token: string;
@@ -38,8 +41,11 @@ function IntegrationBlock({
   oauthUrl: string;
   placeholder: string;
   envHint: string;
+  verified?: boolean | null;
 }) {
-  const isConnected = !!token;
+  const isConnected = !!token && verified === true;
+  const isChecking = !!token && verified === null;
+  const isInvalid = !!token && verified === false;
 
   return (
     <div className="rounded-xl border border-white/60 bg-white/40 p-4">
@@ -48,6 +54,16 @@ function IntegrationBlock({
         {isConnected && (
           <span className="flex items-center gap-1 text-xs font-medium text-green-700">
             <Check size={14} /> Connected
+          </span>
+        )}
+        {isChecking && (
+          <span className="flex items-center gap-1 text-xs font-medium text-slate-500">
+            <Loader2 size={14} className="animate-spin" /> Checking…
+          </span>
+        )}
+        {isInvalid && (
+          <span className="flex items-center gap-1 text-xs font-medium text-amber-700">
+            <XCircle size={14} /> Invalid token
           </span>
         )}
       </div>
@@ -103,7 +119,9 @@ export function SettingsPanel({
   githubToken,
   onGithubTokenChange,
   linearApiKey,
-  onLinearApiKeyChange
+  onLinearApiKeyChange,
+  githubVerified = null,
+  linearVerified = null
 }: SettingsPanelProps) {
   return (
     <AnimatePresence>
@@ -204,6 +222,7 @@ export function SettingsPanel({
                     oauthUrl="/api/auth/github"
                     placeholder="ghp_..."
                     envHint="Set NEXT_PUBLIC_GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET to connect via OAuth, or use a personal token below."
+                    verified={githubVerified}
                   />
                   <IntegrationBlock
                     label="Linear"
@@ -213,6 +232,7 @@ export function SettingsPanel({
                     oauthUrl="/api/auth/linear"
                     placeholder="lin_api_..."
                     envHint="Set NEXT_PUBLIC_LINEAR_CLIENT_ID and LINEAR_CLIENT_SECRET to connect via OAuth, or use a personal token below."
+                    verified={linearVerified}
                   />
                 </div>
                 <p className="mt-3 text-xs text-slate-500">

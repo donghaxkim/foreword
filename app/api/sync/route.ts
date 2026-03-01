@@ -1,3 +1,4 @@
+import { Octokit } from "octokit";
 import { NextRequest, NextResponse } from "next/server";
 
 const CADDY_REPO = process.env.GITHUB_CADDY_REPO ?? "getcaddy/caddy";
@@ -17,92 +18,121 @@ export async function POST(request: NextRequest) {
     }
 
     if (typeof body !== "object" || body === null) {
-      return NextResponse.json({ error: "Missing integration or apiKey" }, { status: 400 });
+      return NextResponse.json(
+        { githubContent: "", linearContent: "" },
+        { status: 200 }
+      );
     }
 
-    const { integration, apiKey } = body as Record<string, unknown>;
+    const b = body as Record<string, unknown>;
+    // Support legacy { integration, apiKey } for backward compatibility
+    let githubApiKey = typeof b.githubApiKey === "string" ? b.githubApiKey.trim() : "";
+    let linearApiKey = typeof b.linearApiKey === "string" ? b.linearApiKey.trim() : "";
+    if (b.integration === "github" && typeof b.apiKey === "string" && b.apiKey.trim()) {
+      githubApiKey = (b.apiKey as string).trim();
+    }
+    if (b.integration === "linear" && typeof b.apiKey === "string" && b.apiKey.trim()) {
+      linearApiKey = (b.apiKey as string).trim();
+    }
+    // Optional server-side fallback
+    if (!githubApiKey && process.env.GITHUB_TOKEN) githubApiKey = process.env.GITHUB_TOKEN;
+    if (!linearApiKey && process.env.LINEAR_API_KEY) linearApiKey = process.env.LINEAR_API_KEY;
 
-    if (integration !== "github" && integration !== "linear") {
-      return NextResponse.json({ error: "integration must be 'github' or 'linear'" }, { status: 400 });
+    const result: {
+      githubContent: string;
+      linearContent: string;
+      githubError?: string;
+      linearError?: string;
+    } = { githubContent: "", linearContent: "" };
+
+    const [githubResult, linearResult] = await Promise.allSettled([
+      githubApiKey ? fetchGitHubContent(githubApiKey) : Promise.resolve(""),
+      linearApiKey ? fetchLinearContent(linearApiKey) : Promise.resolve("")
+    ]);
+
+    if (githubResult.status === "fulfilled") {
+      result.githubContent = githubResult.value;
+    } else {
+      result.githubError = githubResult.reason?.message ?? "GitHub fetch failed";
+      console.error("[sync] GitHub error", githubResult.reason);
     }
 
-    if (typeof apiKey !== "string" || apiKey.trim() === "") {
-      return NextResponse.json({ error: "Missing or empty apiKey" }, { status: 400 });
+    if (linearResult.status === "fulfilled") {
+      result.linearContent = linearResult.value;
+    } else {
+      result.linearError = linearResult.reason?.message ?? "Linear fetch failed";
+      console.error("[sync] Linear error", linearResult.reason);
     }
 
-    const token = apiKey.trim();
-
-    if (integration === "github") {
-      const ships = await fetchGitHubShips(token);
-      return NextResponse.json({ ships });
-    }
-
-    const ships = await fetchLinearShips(token);
-    return NextResponse.json({ ships });
+    return NextResponse.json(result);
   } catch (err) {
     console.error("[sync]", err);
-    return NextResponse.json({ error: "Sync failed" }, { status: 500 });
+    return NextResponse.json(
+      { githubContent: "", linearContent: "", error: "Sync failed" },
+      { status: 500 }
+    );
   }
 }
 
-async function fetchGitHubShips(apiKey: string): Promise<string> {
+async function fetchGitHubContent(apiKey: string): Promise<string> {
   const [owner, repo] = CADDY_REPO.split("/");
   if (!owner || !repo) {
     return "Invalid GITHUB_CADDY_REPO. Use owner/repo.";
   }
 
-  const since = new Date(Date.now() - SEVEN_DAYS_MS).toISOString();
-  const url = `https://api.github.com/repos/${owner}/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100`;
+  const octokit = new Octokit({ auth: apiKey });
+  const cutoff = new Date(Date.now() - SEVEN_DAYS_MS);
 
-  const res = await fetch(url, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${apiKey}`,
-      "X-GitHub-Api-Version": "2022-11-28"
-    }
+  const { data: pulls } = await octokit.rest.pulls.list({
+    owner,
+    repo,
+    state: "closed",
+    sort: "updated",
+    direction: "desc",
+    per_page: 100
   });
 
-  if (!res.ok) {
-    const text = await res.text();
-    console.error("[sync] GitHub API error", res.status, text);
-    throw new Error("GitHub fetch failed");
-  }
-
-  const data = (await res.json()) as Array<{ closed_at: string | null; title: string; body: string | null }>;
-  const cutoff = Date.now() - SEVEN_DAYS_MS;
-  const lines = data
-    .filter((pr) => pr.closed_at && new Date(pr.closed_at).getTime() >= cutoff)
+  const lines = pulls
+    .filter(
+      (pr): pr is typeof pr & { merged_at: string } =>
+        pr.merged_at != null && new Date(pr.merged_at) >= cutoff
+    )
     .map((pr) => {
       const title = pr.title ?? "";
-      const desc = (pr.body ?? "").trim().replace(/\s+/g, " ").slice(0, 300);
-      return `PR Title: ${title} - ${desc}`;
+      const desc = (pr.body ?? "").trim().replace(/\s+/g, " ");
+      return `${title}: ${desc}`;
     });
 
   if (lines.length === 0) {
-    return "No closed PRs in the last 7 days.";
+    return "No merged PRs in the last 7 days.";
   }
   return lines.join("\n");
 }
 
-async function fetchLinearShips(apiKey: string): Promise<string> {
+async function fetchLinearContent(apiKey: string): Promise<string> {
+  const since = new Date(Date.now() - SEVEN_DAYS_MS).toISOString();
   const query = `
-    query SyncDoneIssues {
+    query SyncDoneIssues($since: DateTime!) {
       issues(
         filter: {
-          state: { name: { eq: "Done" } }
-          cycle: { isActive: { eq: true } }
+          or: [
+            { state: { name: { eq: "Done" } } }
+            { state: { name: { eq: "Completed" } } }
+          ]
+          updatedAt: { gte: $since }
         }
         first: 100
       ) {
         nodes {
           title
+          description
           state { name }
+          updatedAt
         }
       }
     }
   `;
 
-  // Personal API keys (lin_api_*) work bare; OAuth tokens need Bearer prefix
   const authHeader = apiKey.startsWith("lin_") ? apiKey : `Bearer ${apiKey}`;
 
   const res = await fetch("https://api.linear.app/graphql", {
@@ -111,7 +141,7 @@ async function fetchLinearShips(apiKey: string): Promise<string> {
       "Content-Type": "application/json",
       Authorization: authHeader
     },
-    body: JSON.stringify({ query })
+    body: JSON.stringify({ query, variables: { since } })
   });
 
   if (!res.ok) {
@@ -121,7 +151,7 @@ async function fetchLinearShips(apiKey: string): Promise<string> {
   }
 
   const json = (await res.json()) as {
-    data?: { issues?: { nodes?: Array<{ title: string; state?: { name: string } }> } };
+    data?: { issues?: { nodes?: Array<{ title: string; description?: string | null; state?: { name: string }; updatedAt?: string }> } };
     errors?: Array<{ message: string }>;
   };
 
@@ -133,12 +163,12 @@ async function fetchLinearShips(apiKey: string): Promise<string> {
   const nodes = json.data?.issues?.nodes ?? [];
   const lines = nodes.map((issue) => {
     const title = issue.title ?? "";
-    const status = issue.state?.name ?? "Done";
-    return `Task: ${title} - ${status}`;
+    const desc = issue.description ?? "";
+    return `${title}: ${desc}`;
   });
 
   if (lines.length === 0) {
-    return "No issues in Done state for the current cycle.";
+    return "No completed issues updated in the last 7 days.";
   }
   return lines.join("\n");
 }
