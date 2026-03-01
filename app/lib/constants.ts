@@ -1,11 +1,7 @@
 export const PERSONAS_STORAGE_KEY = "foreword-personas";
 export const SELECTED_PERSONA_STORAGE_KEY = "foreword-selected-persona-id";
-export const OPENAI_KEY_STORAGE_KEY = "foreword-openai-key";
 export const GITHUB_TOKEN_STORAGE_KEY = "foreword-github-token";
 export const LINEAR_API_KEY_STORAGE_KEY = "foreword-linear-api-key";
-export const LOOPS_API_KEY_STORAGE_KEY = "foreword-loops-api-key";
-export const LOOPS_TRANSACTIONAL_ID_STORAGE_KEY = "foreword-loops-transactional-id";
-export const LOOPS_RECIPIENT_EMAIL_STORAGE_KEY = "foreword-loops-recipient-email";
 
 export const DEFAULT_SYSTEM_PERSONA = `You are the AI Chief of Staff for Caddy. Your boss, Connor (the CEO), is giving you rough notes about what the team shipped this week. Your job is to turn these into a world-class email.
 

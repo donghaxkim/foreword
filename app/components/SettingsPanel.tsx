@@ -2,7 +2,6 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { Check, ExternalLink } from "lucide-react";
-import { useState } from "react";
 import type { Persona } from "./types";
 
 const githubOAuthAvailable = !!process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID;
@@ -17,18 +16,10 @@ type SettingsPanelProps = {
   onAddPersona: () => void;
   onUpdatePersona: (id: string, updates: Partial<Pick<Persona, "name" | "content">>) => void;
   onRemovePersona: (id: string) => void;
-  openaiKey: string;
-  onOpenaiKeyChange: (v: string) => void;
   githubToken: string;
   onGithubTokenChange: (v: string) => void;
   linearApiKey: string;
   onLinearApiKeyChange: (v: string) => void;
-  loopsApiKey: string;
-  onLoopsApiKeyChange: (v: string) => void;
-  loopsTransactionalId: string;
-  onLoopsTransactionalIdChange: (v: string) => void;
-  loopsRecipientEmail: string;
-  onLoopsRecipientEmailChange: (v: string) => void;
 };
 
 function IntegrationBlock({
@@ -37,7 +28,8 @@ function IntegrationBlock({
   onTokenChange,
   oauthAvailable,
   oauthUrl,
-  placeholder
+  placeholder,
+  envHint
 }: {
   label: string;
   token: string;
@@ -45,9 +37,9 @@ function IntegrationBlock({
   oauthAvailable: boolean;
   oauthUrl: string;
   placeholder: string;
+  envHint: string;
 }) {
   const isConnected = !!token;
-  const [showManual, setShowManual] = useState(false);
 
   return (
     <div className="rounded-xl border border-white/60 bg-white/40 p-4">
@@ -80,27 +72,20 @@ function IntegrationBlock({
         </button>
       )}
 
-      {oauthAvailable && !isConnected && (
-        <button
-          type="button"
-          onClick={() => setShowManual(!showManual)}
-          className="mt-1 block cursor-pointer text-xs text-slate-500 hover:text-slate-700"
-        >
-          {showManual ? "Hide manual entry" : "Or enter token manually"}
-        </button>
-      )}
-
-      {(!oauthAvailable || showManual || isConnected) && (
-        <div className="mt-2">
-          <input
-            type="password"
-            value={token}
-            onChange={(e) => onTokenChange(e.target.value)}
-            className="w-full rounded-xl border border-white/70 bg-white/50 px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-300"
-            placeholder={placeholder}
-            autoComplete="off"
-          />
-        </div>
+      {!oauthAvailable && (
+        <>
+          <p className="mb-2 text-xs text-slate-500">{envHint}</p>
+          <div className="mt-2">
+            <input
+              type="password"
+              value={token}
+              onChange={(e) => onTokenChange(e.target.value)}
+              className="w-full rounded-xl border border-white/70 bg-white/50 px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-300"
+              placeholder={placeholder}
+              autoComplete="off"
+            />
+          </div>
+        </>
       )}
     </div>
   );
@@ -115,18 +100,10 @@ export function SettingsPanel({
   onAddPersona,
   onUpdatePersona,
   onRemovePersona,
-  openaiKey,
-  onOpenaiKeyChange,
   githubToken,
   onGithubTokenChange,
   linearApiKey,
-  onLinearApiKeyChange,
-  loopsApiKey,
-  onLoopsApiKeyChange,
-  loopsTransactionalId,
-  onLoopsTransactionalIdChange,
-  loopsRecipientEmail,
-  onLoopsRecipientEmailChange
+  onLinearApiKeyChange
 }: SettingsPanelProps) {
   return (
     <AnimatePresence>
@@ -226,6 +203,7 @@ export function SettingsPanel({
                     oauthAvailable={githubOAuthAvailable}
                     oauthUrl="/api/auth/github"
                     placeholder="ghp_..."
+                    envHint="Set NEXT_PUBLIC_GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET to connect via OAuth, or use a personal token below."
                   />
                   <IntegrationBlock
                     label="Linear"
@@ -234,65 +212,12 @@ export function SettingsPanel({
                     oauthAvailable={linearOAuthAvailable}
                     oauthUrl="/api/auth/linear"
                     placeholder="lin_api_..."
+                    envHint="Set NEXT_PUBLIC_LINEAR_CLIENT_ID and LINEAR_CLIENT_SECRET to connect via OAuth, or use a personal token below."
                   />
                 </div>
-              </section>
-
-              <section className="mb-8">
-                <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-slate-500">API Keys</h3>
-                <label className="block">
-                  <span className="mb-1 block text-sm font-medium text-slate-700">OpenAI Key</span>
-                  <input
-                    type="password"
-                    value={openaiKey}
-                    onChange={(e) => onOpenaiKeyChange(e.target.value)}
-                    className="w-full rounded-xl border border-white/70 bg-white/50 px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-300"
-                    placeholder="sk-..."
-                    autoComplete="off"
-                  />
-                </label>
-              </section>
-
-              <section className="mb-6">
-                <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-slate-500">Loops Config</h3>
-                <div className="space-y-3">
-                  <label className="block">
-                    <span className="mb-1 block text-sm font-medium text-slate-700">Loops API Key</span>
-                    <input
-                      type="password"
-                      value={loopsApiKey}
-                      onChange={(e) => onLoopsApiKeyChange(e.target.value)}
-                      className="w-full rounded-xl border border-white/70 bg-white/50 px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-300"
-                      placeholder="Loops API key"
-                      autoComplete="off"
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="mb-1 block text-sm font-medium text-slate-700">Transactional Template ID</span>
-                    <input
-                      type="text"
-                      value={loopsTransactionalId}
-                      onChange={(e) => onLoopsTransactionalIdChange(e.target.value)}
-                      className="w-full rounded-xl border border-white/70 bg-white/50 px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-300"
-                      placeholder="clt_..."
-                      autoComplete="off"
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="mb-1 block text-sm font-medium text-slate-700">Default Recipient Email</span>
-                    <input
-                      type="email"
-                      value={loopsRecipientEmail}
-                      onChange={(e) => onLoopsRecipientEmailChange(e.target.value)}
-                      className="w-full rounded-xl border border-white/70 bg-white/50 px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-300"
-                      placeholder="team@example.com"
-                      autoComplete="off"
-                    />
-                  </label>
-                  <p className="text-xs text-slate-500">
-                    Create a transactional template in Loops.so with {"{{subject}}"}, {"{{preheader}}"}, and {"{{body}}"} variables.
-                  </p>
-                </div>
+                <p className="mt-3 text-xs text-slate-500">
+                  Loops sending is managed by server configuration in this workspace.
+                </p>
               </section>
             </div>
           </motion.div>

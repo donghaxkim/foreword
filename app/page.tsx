@@ -13,10 +13,6 @@ import {
   DEFAULT_SYSTEM_PERSONA,
   GITHUB_TOKEN_STORAGE_KEY,
   LINEAR_API_KEY_STORAGE_KEY,
-  LOOPS_API_KEY_STORAGE_KEY,
-  LOOPS_RECIPIENT_EMAIL_STORAGE_KEY,
-  LOOPS_TRANSACTIONAL_ID_STORAGE_KEY,
-  OPENAI_KEY_STORAGE_KEY,
   PERSONAS_STORAGE_KEY,
   SELECTED_PERSONA_STORAGE_KEY,
   mapSuggestionToPrompt,
@@ -34,12 +30,10 @@ export default function Home() {
     { id: "default", name: "Caddy Chief of Staff", content: DEFAULT_SYSTEM_PERSONA }
   ]);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>("default");
-  const [openaiKey, setOpenaiKey] = useState("");
   const [githubToken, setGithubToken] = useState("");
   const [linearApiKey, setLinearApiKey] = useState("");
-  const [loopsApiKey, setLoopsApiKey] = useState("");
-  const [loopsTransactionalId, setLoopsTransactionalId] = useState("");
-  const [loopsRecipientEmail, setLoopsRecipientEmail] = useState("");
+  const [loopsConfigured, setLoopsConfigured] = useState(false);
+  const [loopsDefaultRecipient, setLoopsDefaultRecipient] = useState("");
   const [draft, setDraft] = useState<{ subject: string; preheader: string; body: string } | null>(null);
   const [generateLoading, setGenerateLoading] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
@@ -78,18 +72,21 @@ export default function Home() {
     }
     const storedId = localStorage.getItem(SELECTED_PERSONA_STORAGE_KEY);
     if (storedId != null) setSelectedPersonaId(storedId);
-    const openai = localStorage.getItem(OPENAI_KEY_STORAGE_KEY);
-    if (openai != null) setOpenaiKey(openai);
     const github = localStorage.getItem(GITHUB_TOKEN_STORAGE_KEY);
     if (github != null) setGithubToken(github);
     const linear = localStorage.getItem(LINEAR_API_KEY_STORAGE_KEY);
     if (linear != null) setLinearApiKey(linear);
-    const loops = localStorage.getItem(LOOPS_API_KEY_STORAGE_KEY);
-    if (loops != null) setLoopsApiKey(loops);
-    const txId = localStorage.getItem(LOOPS_TRANSACTIONAL_ID_STORAGE_KEY);
-    if (txId != null) setLoopsTransactionalId(txId);
-    const recipient = localStorage.getItem(LOOPS_RECIPIENT_EMAIL_STORAGE_KEY);
-    if (recipient != null) setLoopsRecipientEmail(recipient);
+  }, []);
+
+  // Fetch server config (Loops availability and default recipient)
+  useEffect(() => {
+    fetch("/api/config")
+      .then((res) => res.json())
+      .then((data: { loopsConfigured?: boolean; loopsDefaultRecipient?: string }) => {
+        if (data.loopsConfigured != null) setLoopsConfigured(data.loopsConfigured);
+        if (data.loopsDefaultRecipient != null) setLoopsDefaultRecipient(data.loopsDefaultRecipient ?? "");
+      })
+      .catch(() => {});
   }, []);
 
   // Phase 1: Auto-sync when switching to GitHub/Linear mode
@@ -103,7 +100,15 @@ export default function Home() {
     const apiKey = activeMode === "GitHub" ? githubToken : linearApiKey;
 
     if (!apiKey) {
-      setSyncError(`Add your ${activeMode} ${activeMode === "GitHub" ? "token" : "API key"} in Settings to sync.`);
+      const githubOAuth = !!process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID;
+      const linearOAuth = !!process.env.NEXT_PUBLIC_LINEAR_CLIENT_ID;
+      const useConnectCopy =
+        (activeMode === "GitHub" && githubOAuth) || (activeMode === "Linear" && linearOAuth);
+      setSyncError(
+        useConnectCopy
+          ? `Connect ${activeMode} in Settings to sync.`
+          : `Add your ${activeMode} ${activeMode === "GitHub" ? "token" : "API key"} in Settings to sync.`
+      );
       return;
     }
 
@@ -126,7 +131,7 @@ export default function Home() {
         setInputValue(data.ships);
       })
       .catch(() => {
-        if (!cancelled) setSyncError("Sync failed — check your API key and try again.");
+        if (!cancelled) setSyncError("Sync failed — check your connection and try again.");
       })
       .finally(() => {
         if (!cancelled) setSyncLoading(false);
@@ -193,8 +198,6 @@ export default function Home() {
         isManual: activeMode === "Manual"
       };
       if (activePersonaContent) body.systemPersona = activePersonaContent;
-      // Phase 2: Pass client-stored OpenAI key as fallback
-      if (openaiKey) body.openaiApiKey = openaiKey;
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -244,9 +247,9 @@ export default function Home() {
     }
   };
 
-  // Phase 4: Loops send handler
+  // Phase 4: Loops send handler (uses server-side Loops config)
   const handleSendViaLoops = async (recipientEmail: string) => {
-    if (!draft || !loopsApiKey || !loopsTransactionalId || !recipientEmail) return;
+    if (!draft || !recipientEmail) return;
     setSendLoading(true);
     setSendError(null);
     setSendSuccess(false);
@@ -258,8 +261,6 @@ export default function Home() {
           subject: draft.subject,
           preheader: draft.preheader,
           htmlBody: draft.body,
-          loopsApiKey,
-          transactionalId: loopsTransactionalId,
           recipientEmail
         })
       });
@@ -324,18 +325,10 @@ export default function Home() {
         onAddPersona={addPersona}
         onUpdatePersona={updatePersona}
         onRemovePersona={removePersona}
-        openaiKey={openaiKey}
-        onOpenaiKeyChange={(v) => { setOpenaiKey(v); persist(OPENAI_KEY_STORAGE_KEY, v); }}
         githubToken={githubToken}
         onGithubTokenChange={(v) => { setGithubToken(v); persist(GITHUB_TOKEN_STORAGE_KEY, v); }}
         linearApiKey={linearApiKey}
         onLinearApiKeyChange={(v) => { setLinearApiKey(v); persist(LINEAR_API_KEY_STORAGE_KEY, v); }}
-        loopsApiKey={loopsApiKey}
-        onLoopsApiKeyChange={(v) => { setLoopsApiKey(v); persist(LOOPS_API_KEY_STORAGE_KEY, v); }}
-        loopsTransactionalId={loopsTransactionalId}
-        onLoopsTransactionalIdChange={(v) => { setLoopsTransactionalId(v); persist(LOOPS_TRANSACTIONAL_ID_STORAGE_KEY, v); }}
-        loopsRecipientEmail={loopsRecipientEmail}
-        onLoopsRecipientEmailChange={(v) => { setLoopsRecipientEmail(v); persist(LOOPS_RECIPIENT_EMAIL_STORAGE_KEY, v); }}
       />
 
       {/* Main chat column */}
@@ -393,9 +386,8 @@ export default function Home() {
                   generateError={generateError}
                   copySuccess={copySuccess}
                   onCopyHtml={handleCopyHtml}
-                  loopsApiKey={loopsApiKey}
-                  loopsTransactionalId={loopsTransactionalId}
-                  defaultRecipientEmail={loopsRecipientEmail}
+                  loopsConfigured={loopsConfigured}
+                  defaultRecipientEmail={loopsDefaultRecipient}
                   onSendViaLoops={handleSendViaLoops}
                   sendLoading={sendLoading}
                   sendError={sendError}

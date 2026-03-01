@@ -2,7 +2,7 @@
 
 import { Check, Send } from "lucide-react";
 import { motion } from "framer-motion";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Draft = {
   subject: string;
@@ -16,9 +16,8 @@ type DraftPreviewProps = {
   generateError: string | null;
   copySuccess: boolean;
   onCopyHtml: () => void;
-  // Loops send
-  loopsApiKey: string;
-  loopsTransactionalId: string;
+  // Loops send (server-configured)
+  loopsConfigured: boolean;
   defaultRecipientEmail: string;
   onSendViaLoops: (recipientEmail: string) => Promise<void>;
   sendLoading: boolean;
@@ -32,8 +31,7 @@ export function DraftPreview({
   generateError,
   copySuccess,
   onCopyHtml,
-  loopsApiKey,
-  loopsTransactionalId,
+  loopsConfigured,
   defaultRecipientEmail,
   onSendViaLoops,
   sendLoading,
@@ -41,8 +39,16 @@ export function DraftPreview({
   sendSuccess
 }: DraftPreviewProps) {
   const [recipientEmail, setRecipientEmail] = useState(defaultRecipientEmail);
+  const hasAppliedDefault = useRef(false);
 
-  const canSend = loopsApiKey && loopsTransactionalId && recipientEmail.trim();
+  useEffect(() => {
+    if (defaultRecipientEmail && !hasAppliedDefault.current) {
+      hasAppliedDefault.current = true;
+      setRecipientEmail(defaultRecipientEmail);
+    }
+  }, [defaultRecipientEmail]);
+
+  const canSend = loopsConfigured && recipientEmail.trim();
 
   return (
     <div className="flex justify-start">
@@ -132,11 +138,8 @@ export function DraftPreview({
                       )}
                     </button>
                   </div>
-                  {!loopsApiKey && (
-                    <p className="mt-1 text-xs text-amber-700">Add your Loops API key in Settings to send emails.</p>
-                  )}
-                  {loopsApiKey && !loopsTransactionalId && (
-                    <p className="mt-1 text-xs text-amber-700">Add a Transactional Template ID in Settings.</p>
+                  {!loopsConfigured && (
+                    <p className="mt-1 text-xs text-amber-700">Loops is not configured on the server.</p>
                   )}
                   {sendError && (
                     <p className="mt-1 text-xs text-red-600">{sendError}</p>

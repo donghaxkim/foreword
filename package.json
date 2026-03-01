@@ -9,12 +9,12 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
     "@next/swc-darwin-arm64": "^16.1.6",
     "framer-motion": "latest",
     "lucide-react": "latest",
     "next": "latest",
     "octokit": "^5.0.5",
-    "openai": "^6.25.0",
     "react": "latest",
     "react-dom": "latest"
   },
