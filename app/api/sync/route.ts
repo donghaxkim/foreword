@@ -2,7 +2,6 @@ import { Octokit } from "octokit";
 import { NextRequest, NextResponse } from "next/server";
 import { loadTokensForDevice } from "@/app/lib/tokens";
 
-const CADDY_REPO = process.env.GITHUB_CADDY_REPO ?? "getcaddy/caddy";
 const DEFAULT_SYNC_DAYS = 7;
 const MIN_SYNC_DAYS = 1;
 const MAX_SYNC_DAYS = 90;
@@ -13,6 +12,17 @@ function parseSyncDays(body: Record<string, unknown>): number {
   const n = typeof raw === "number" ? raw : Number(raw);
   if (!Number.isFinite(n)) return DEFAULT_SYNC_DAYS;
   return Math.max(MIN_SYNC_DAYS, Math.min(MAX_SYNC_DAYS, Math.floor(n)));
+}
+
+/** Returns "owner/repo" if valid, otherwise null. */
+function parseGitHubRepo(body: Record<string, unknown>): string | null {
+  const raw = body.repo ?? body.githubRepo;
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  const parts = trimmed.split("/").filter(Boolean);
+  if (parts.length !== 2) return null;
+  if (!parts[0] || !parts[1]) return null;
+  return `${parts[0]}/${parts[1]}`;
 }
 
 export async function GET() {
@@ -56,6 +66,7 @@ export async function POST(request: NextRequest) {
     if (!linearApiKey && process.env.LINEAR_API_KEY) linearApiKey = process.env.LINEAR_API_KEY;
 
     const syncDays = parseSyncDays(body);
+    const githubRepo = parseGitHubRepo(body);
 
     const result: {
       githubContent: string;
@@ -64,8 +75,13 @@ export async function POST(request: NextRequest) {
       linearError?: string;
     } = { githubContent: "", linearContent: "" };
 
+    const shouldFetchGitHub = !!githubApiKey && !!githubRepo;
+    if (githubApiKey && !githubRepo) {
+      result.githubError = "Select a repository in Settings (e.g. owner/repo).";
+    }
+
     const [githubResult, linearResult] = await Promise.allSettled([
-      githubApiKey ? fetchGitHubContent(githubApiKey, syncDays) : Promise.resolve(""),
+      shouldFetchGitHub ? fetchGitHubContent(githubApiKey, syncDays, githubRepo!) : Promise.resolve(""),
       linearApiKey ? fetchLinearContent(linearApiKey, syncDays) : Promise.resolve("")
     ]);
 
@@ -93,10 +109,10 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function fetchGitHubContent(apiKey: string, days: number): Promise<string> {
-  const [owner, repo] = CADDY_REPO.split("/");
+async function fetchGitHubContent(apiKey: string, days: number, repoFull: string): Promise<string> {
+  const [owner, repo] = repoFull.split("/");
   if (!owner || !repo) {
-    return "Invalid GITHUB_CADDY_REPO. Use owner/repo.";
+    return "Invalid repository. Use owner/repo.";
   }
 
   const rangeMs = days * 24 * 60 * 60 * 1000;
@@ -132,7 +148,7 @@ async function fetchGitHubContent(apiKey: string, days: number): Promise<string>
     const status = (err as { status?: number })?.status;
     if (status === 404) {
       throw new Error(
-        `GitHub: Repository "${CADDY_REPO}" not found or you don't have access. Set GITHUB_CADDY_REPO to your repo (e.g. your-org/your-repo) and use a token that can read that repo.`
+        `GitHub: Repository "${repoFull}" not found or you don't have access. Check the repo in Settings and use a token that can read it.`
       );
     }
     if (status === 401) {

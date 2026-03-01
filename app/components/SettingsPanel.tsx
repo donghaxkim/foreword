@@ -22,6 +22,8 @@ type SettingsPanelProps = {
   githubScopes: string;
   linearScopes: string;
   onConnectionChange: () => void;
+  githubRepo?: string;
+  onGithubRepoChange?: (v: string) => void;
 };
 
 function IntegrationBlock({
@@ -199,6 +201,8 @@ export function SettingsPanel({
   githubScopes,
   linearScopes,
   onConnectionChange,
+  githubRepo = "",
+  onGithubRepoChange,
 }: SettingsPanelProps) {
   return (
     <AnimatePresence>
@@ -303,6 +307,24 @@ export function SettingsPanel({
                     scopeHint="Recommended: Fine-grained PAT with repo:read scope."
                     onConnectionChange={onConnectionChange}
                   />
+                  {onGithubRepoChange && (
+                    <div className="rounded-xl border border-white/60 bg-white/40 p-4">
+                      <label className="mb-2 block text-sm font-medium text-slate-700">
+                        GitHub repository
+                      </label>
+                      <input
+                        type="text"
+                        value={githubRepo}
+                        onChange={(e) => onGithubRepoChange(e.target.value)}
+                        placeholder="owner/repo (e.g. facebook/react)"
+                        className="w-full rounded-xl border border-white/70 bg-white/50 px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-300"
+                        autoComplete="off"
+                      />
+                      <p className="mt-1.5 text-xs text-slate-500">
+                        Repo to sync PRs and commits from. Your token must have access to this repo.
+                      </p>
+                    </div>
+                  )}
                   <IntegrationBlock
                     label="Linear"
                     provider="linear"

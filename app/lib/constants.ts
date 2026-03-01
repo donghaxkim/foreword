@@ -1,5 +1,6 @@
 export const PERSONAS_STORAGE_KEY = "foreword-personas";
 export const SELECTED_PERSONA_STORAGE_KEY = "foreword-selected-persona-id";
+export const GITHUB_REPO_STORAGE_KEY = "foreword-github-repo";
 export const GITHUB_TOKEN_STORAGE_KEY = "foreword-github-token";
 export const LINEAR_API_KEY_STORAGE_KEY = "foreword-linear-api-key";
 
@@ -18,30 +19,13 @@ The JSON must have exactly these keys:
 - "preheader" (string): preheader text, plain text only, no HTML.
 - "body" (string): email body as HTML only. Use only these tags: p, ul, li, strong. Do not use markdown. Write proper HTML. The output will be pasted into Loops.so.`;
 
-export const suggestionChips = [
-  "Draft investor update",
-  "Customer follow-up",
-  "Team weekly summary",
-  "Executive brief",
-  "Partnership intro",
-  "Hiring outreach"
-];
+/** Vibe chips shown below the input; they only set tone, not prompt text. */
+export const vibeChips = ["Investors", "Beta Testers", "General"] as const;
 
 export function mapSuggestionToVibe(label: string | null): string {
   if (!label) return "General";
   const lower = label.toLowerCase();
   if (lower.includes("investor")) return "Investors";
-  if (lower.includes("customer") || lower.includes("beta") || lower.includes("follow-up")) return "Beta Testers";
+  if (lower.includes("beta") || lower.includes("tester")) return "Beta Testers";
   return "General";
-}
-
-export function mapSuggestionToPrompt(label: string): string {
-  const lower = label.toLowerCase();
-  if (lower.includes("investor")) return "Here's what we shipped this week:\n- ";
-  if (lower.includes("customer") || lower.includes("follow-up")) return "Following up with the customer about:\n- ";
-  if (lower.includes("team") || lower.includes("weekly")) return "Team weekly highlights:\n- ";
-  if (lower.includes("executive") || lower.includes("brief")) return "Key updates for leadership:\n- ";
-  if (lower.includes("partnership") || lower.includes("intro")) return "Introduction for a potential partnership:\n- ";
-  if (lower.includes("hiring") || lower.includes("outreach")) return "We're hiring! Here's what makes our team great:\n- ";
-  return "";
 }

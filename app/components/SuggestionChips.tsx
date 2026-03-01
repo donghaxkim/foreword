@@ -1,6 +1,6 @@
 "use client";
 
-import { suggestionChips } from "@/app/lib/constants";
+import { vibeChips } from "@/app/lib/constants";
 
 type SuggestionChipsProps = {
   selectedSuggestion: string | null;
@@ -10,7 +10,7 @@ type SuggestionChipsProps = {
 export function SuggestionChips({ selectedSuggestion, onSuggestionClick }: SuggestionChipsProps) {
   return (
     <div className="flex flex-wrap justify-center gap-2">
-      {suggestionChips.map((label) => {
+      {vibeChips.map((label) => {
         const isActive = selectedSuggestion === label;
         return (
           <button

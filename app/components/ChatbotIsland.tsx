@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { ArrowRight } from "lucide-react";
 import { useLayoutEffect, useRef } from "react";
 import { type Mode, modes } from "./types";
 
@@ -67,9 +68,9 @@ export function ChatbotIsland({
       ? "Fetching recent PRs..."
       : "Fetching Linear tasks..."
     : activeMode === "GitHub"
-      ? "GitHub PRs loaded — edit and submit"
+      ? "What should we write? (GitHub data is used as context)"
       : activeMode === "Linear"
-        ? "Linear tasks loaded — edit and submit"
+        ? "What should we write? (Linear data is used as context)"
         : "Compose your request...";
 
   const content = (
@@ -132,27 +133,38 @@ export function ChatbotIsland({
           </motion.span>
         </div>
       )}
-      <label className="block">
-        <span className="sr-only">Describe your request</span>
-        <textarea
-          ref={textareaRef}
-          rows={1}
-          placeholder={placeholder}
-          value={inputValue}
-          onChange={handleInputChange}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              formRef.current?.requestSubmit();
-            }
-          }}
-          className="min-h-[48px] w-full resize-none overflow-y-auto rounded-2xl border border-white/70 bg-white/60 px-5 py-3 text-[15px] font-light leading-6 text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-slate-300 focus:bg-white/85 focus:ring-0"
-          style={{ height: "auto", maxHeight: MAX_TEXTAREA_ROWS * LINE_HEIGHT_PX }}
-        />
-      </label>
+      <div className="flex items-end gap-2">
+        <label className="flex-1 block">
+          <span className="sr-only">Describe your request</span>
+          <textarea
+            ref={textareaRef}
+            rows={1}
+            placeholder={placeholder}
+            value={inputValue}
+            onChange={handleInputChange}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                formRef.current?.requestSubmit();
+              }
+            }}
+            className="min-h-[48px] w-full resize-none overflow-y-auto rounded-2xl border border-white/70 bg-white/60 px-5 py-3 text-[15px] font-light leading-6 text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-slate-300 focus:bg-white/85 focus:ring-0"
+            style={{ height: "auto", maxHeight: MAX_TEXTAREA_ROWS * LINE_HEIGHT_PX }}
+          />
+        </label>
+        <button
+          type="submit"
+          disabled={!hasContent}
+          aria-label="Generate"
+          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-sm transition hover:bg-slate-800 disabled:pointer-events-none disabled:opacity-50"
+        >
+          <ArrowRight size={20} strokeWidth={2} />
+        </button>
+      </div>
       {hasContent && (
         <p className="text-right text-xs text-slate-500">
-          Ready to ship
+          <kbd className="rounded border border-slate-300 bg-white/60 px-1.5 py-0.5 font-mono text-[10px]">Enter</kbd>
+          {" "}to generate
           <span className="ml-1.5 text-slate-400">· {inputValue.trim().length} characters</span>
         </p>
       )}

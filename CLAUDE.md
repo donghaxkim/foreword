@@ -25,14 +25,14 @@ Next.js App Router app (single page). Source lives in `app/`.
 - `DraftPreview.tsx` — draft results card with copy HTML + Loops send
 
 **Lib** (`app/lib/`):
-- `constants.ts` — storage keys, default persona, suggestion chips, `mapSuggestionToVibe`, `mapSuggestionToPrompt`
+- `constants.ts` — storage keys, default persona, vibe chips (`vibeChips`), `mapSuggestionToVibe`
 
 **Page** — `app/page.tsx` is the composition root (client component). Holds all state, effects, and handlers. Uses framer-motion for animations, lucide-react for icons, Tailwind CSS v4 (via `@tailwindcss/postcss`). A glassmorphism design system is defined in `app/globals.css` (`.glass-card` class). Two Google Fonts are loaded in `app/layout.tsx`: Inter (`--font-ui`) and Cormorant Garamond (`--font-brand`).
 
 **API Routes:**
 - `POST /api/generate` — sends user prompt + system persona to Anthropic (Claude) and returns `{ subject, preheader, body }`. The body is HTML using only `<p>`, `<ul>`, `<li>`, `<strong>` tags. Uses server-side `ANTHROPIC_API_KEY` env var only.
 - `GET /api/config` — returns `{ loopsConfigured, loopsDefaultRecipient }` from server env (no secrets). Used by the client to show the Send via Loops UI and pre-fill default recipient.
-- `POST /api/sync` — fetches recent data from GitHub (closed PRs in last 7 days) or Linear (done issues in current cycle). Accepts `{ integration: "github"|"linear", apiKey }`. GitHub repo is configured via `GITHUB_CADDY_REPO` env var (defaults to `getcaddy/caddy`). Auto-triggered when switching to GitHub/Linear mode. Tokens come from OAuth (Connect in Settings) or manual entry when OAuth is not configured. Handles both personal API keys and OAuth tokens for Linear (auto-detects Bearer prefix).
+- `POST /api/sync` — fetches recent data from GitHub (merged PRs and commits) or Linear (done issues). Accepts `{ days?, repo? }`. GitHub repo is set by the user in Settings (owner/repo); tokens from OAuth or manual entry. Auto-triggered when switching to GitHub/Linear mode.
 - `POST /api/send` — proxies email send to Loops.so transactional API. Uses server-side `LOOPS_API_KEY` and `LOOPS_TRANSACTIONAL_ID`. Accepts only `{ subject, preheader, htmlBody, recipientEmail }`.
 - `GET /api/auth/[provider]` — initiates OAuth flow for `github` or `linear`. Sets a CSRF state cookie and redirects to the provider's authorization page.
 - `GET /api/auth/[provider]/callback` — handles OAuth callback, exchanges authorization code for access token, stores token in localStorage via an HTML bridge page, and redirects to `/`.
@@ -48,7 +48,7 @@ See `.env.example`.
 - **Anthropic** — server-side only. Set `ANTHROPIC_API_KEY` for `POST /api/generate`.
 - **Loops** — server-side only. Set `LOOPS_API_KEY` and `LOOPS_TRANSACTIONAL_ID` for `POST /api/send`. Optional `LOOPS_RECIPIENT_EMAIL` pre-fills the Send UI (exposed via `GET /api/config`).
 - **GitHub / Linear** — users connect via OAuth in Settings. Set `NEXT_PUBLIC_GITHUB_CLIENT_ID` + `GITHUB_CLIENT_SECRET` and/or `NEXT_PUBLIC_LINEAR_CLIENT_ID` + `LINEAR_CLIENT_SECRET` to enable Connect buttons; when not set, Settings shows setup instructions and manual token entry. OAuth callback URLs: `<domain>/api/auth/github/callback` and `<domain>/api/auth/linear/callback`.
-- Optional: `GITHUB_CADDY_REPO` (defaults to `getcaddy/caddy`) for PR sync.
+- GitHub repo for sync is chosen in the app (Settings → GitHub repository); no env var required.
 
 ## Style Notes
 

@@ -11,9 +11,9 @@ import { SuggestionChips } from "./components/SuggestionChips";
 import type { Mode, Persona } from "./components/types";
 import {
   DEFAULT_SYSTEM_PERSONA,
+  GITHUB_REPO_STORAGE_KEY,
   PERSONAS_STORAGE_KEY,
   SELECTED_PERSONA_STORAGE_KEY,
-  mapSuggestionToPrompt,
   mapSuggestionToVibe
 } from "./lib/constants";
 
@@ -49,6 +49,7 @@ export default function Home() {
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncDays, setSyncDays] = useState<number>(7);
+  const [githubRepo, setGithubRepo] = useState("");
   const [lastSyncedGithubContent, setLastSyncedGithubContent] = useState("");
   const [lastSyncedLinearContent, setLastSyncedLinearContent] = useState("");
   const [sendLoading, setSendLoading] = useState(false);
@@ -103,6 +104,8 @@ export default function Home() {
     }
     const storedId = localStorage.getItem(SELECTED_PERSONA_STORAGE_KEY);
     if (storedId != null) setSelectedPersonaId(storedId);
+    const storedRepo = localStorage.getItem(GITHUB_REPO_STORAGE_KEY);
+    if (storedRepo != null) setGithubRepo(storedRepo);
 
     // Clean up legacy token keys from localStorage
     localStorage.removeItem("foreword-github-token");
@@ -147,6 +150,11 @@ export default function Home() {
       return;
     }
 
+    if (activeMode === "GitHub" && !githubRepo.trim()) {
+      setSyncError("Select a repository in Settings (e.g. owner/repo).");
+      return;
+    }
+
     let cancelled = false;
     setSyncLoading(true);
     setSyncError(null);
@@ -154,7 +162,7 @@ export default function Home() {
     fetch("/api/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ days: syncDays })
+      body: JSON.stringify({ days: syncDays, repo: githubRepo.trim() || undefined })
     })
       .then(async (res) => {
         if (cancelled) return;
@@ -171,13 +179,6 @@ export default function Home() {
         }
         setLastSyncedGithubContent(data.githubContent ?? "");
         setLastSyncedLinearContent(data.linearContent ?? "");
-        const content =
-          activeMode === "GitHub"
-            ? (data.githubContent ?? "")
-            : activeMode === "Linear"
-              ? (data.linearContent ?? "")
-              : "";
-        setInputValue(content);
         if (activeMode === "GitHub" && data.githubError) setSyncError(data.githubError);
         else if (activeMode === "Linear" && data.linearError) setSyncError(data.linearError);
       })
@@ -191,7 +192,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [activeMode, githubConnected, linearConnected, syncDays]);
+  }, [activeMode, githubConnected, linearConnected, syncDays, githubRepo]);
 
   const savePersonas = (next: Persona[]) => {
     setPersonas(next);
@@ -282,9 +283,6 @@ export default function Home() {
   const handleSuggestionClick = (label: string) => {
     const isDeselecting = selectedSuggestion === label;
     setSelectedSuggestion(isDeselecting ? null : label);
-    if (!isDeselecting) {
-      setInputValue(mapSuggestionToPrompt(label));
-    }
   };
 
   const handleCopyHtml = async () => {
@@ -439,6 +437,11 @@ export default function Home() {
         githubScopes={githubScopes}
         linearScopes={linearScopes}
         onConnectionChange={fetchTokenStatus}
+        githubRepo={githubRepo}
+        onGithubRepoChange={(v) => {
+          setGithubRepo(v);
+          if (typeof window !== "undefined") localStorage.setItem(GITHUB_REPO_STORAGE_KEY, v);
+        }}
       />
 
       {/* Main chat column */}
