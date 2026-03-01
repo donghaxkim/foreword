@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { encrypt } from "@/app/lib/crypto";
+import { getOrCreateDeviceId } from "@/app/lib/device";
+import { getSupabase } from "@/app/lib/supabase";
 
 function htmlPage(title: string, body: string) {
   return `<!DOCTYPE html>
@@ -13,25 +16,6 @@ function errorPage(message: string) {
     <h2>Connection failed</h2>
     <p>${message}</p>
     <p><a href="/">Back to Foreword</a></p>
-  `);
-}
-
-function successPage(storageKey: string, token: string, provider: string) {
-  const tokenJson = JSON.stringify(token);
-  const keyJson = JSON.stringify(storageKey);
-  const label = provider === "github" ? "GitHub" : "Linear";
-  return htmlPage("Connected!", `
-    <h2>${label} connected</h2>
-    <p>Redirecting...</p>
-    <script>
-      try {
-        localStorage.setItem(${keyJson}, ${tokenJson});
-        window.location.href = "/?connected=${provider}";
-      } catch (e) {
-        document.querySelector('.card').innerHTML =
-          '<h2>Failed to save</h2><p>Could not store token. Please try again.</p><p><a href="/">Back to Foreword</a></p>';
-      }
-    </script>
   `);
 }
 
@@ -96,11 +80,39 @@ export async function GET(
     });
   }
 
-  const storageKey = provider === "github" ? "foreword-github-token" : "foreword-linear-api-key";
+  // Encrypt and save token to Supabase
+  const { ciphertext, iv, authTag } = encrypt(accessToken);
 
-  const response = new NextResponse(successPage(storageKey, accessToken, provider), {
-    headers: { "Content-Type": "text/html" }
-  });
+  const redirectUrl = `${origin}/?connected=${provider}`;
+  const response = NextResponse.redirect(redirectUrl);
+
+  const deviceId = getOrCreateDeviceId(request, response);
+
+  // Determine scopes for display
+  const scopes = provider === "github" ? "repo" : "read";
+
+  try {
+    const supabase = getSupabase();
+    await supabase.from("tokens").upsert(
+      {
+        device_id: deviceId,
+        provider,
+        encrypted_token: ciphertext,
+        iv,
+        auth_tag: authTag,
+        scopes,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "device_id,provider" }
+    );
+  } catch (err) {
+    console.error(`[auth/${provider}] Failed to save token to Supabase:`, err);
+    return new NextResponse(errorPage("Failed to save credentials. Please try again."), {
+      status: 500,
+      headers: { "Content-Type": "text/html" },
+    });
+  }
+
   // Clear the state cookie
   response.cookies.delete(`oauth_state_${provider}`);
   return response;

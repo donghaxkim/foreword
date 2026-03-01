@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Check, ExternalLink, Loader2, XCircle } from "lucide-react";
 import type { Persona } from "./types";
@@ -16,59 +17,108 @@ type SettingsPanelProps = {
   onAddPersona: () => void;
   onUpdatePersona: (id: string, updates: Partial<Pick<Persona, "name" | "content">>) => void;
   onRemovePersona: (id: string) => void;
-  githubToken: string;
-  onGithubTokenChange: (v: string) => void;
-  linearApiKey: string;
-  onLinearApiKeyChange: (v: string) => void;
-  githubVerified?: boolean | null;
-  linearVerified?: boolean | null;
+  githubConnected: boolean;
+  linearConnected: boolean;
+  githubScopes: string;
+  linearScopes: string;
+  onConnectionChange: () => void;
 };
 
 function IntegrationBlock({
   label,
-  token,
-  onTokenChange,
+  provider,
+  connected,
+  scopes,
   oauthAvailable,
   oauthUrl,
   placeholder,
   envHint,
-  verified = null
+  scopeHint,
+  onConnectionChange,
 }: {
   label: string;
-  token: string;
-  onTokenChange: (v: string) => void;
+  provider: "github" | "linear";
+  connected: boolean;
+  scopes: string;
   oauthAvailable: boolean;
   oauthUrl: string;
   placeholder: string;
   envHint: string;
-  verified?: boolean | null;
+  scopeHint: string;
+  onConnectionChange: () => void;
 }) {
-  const isConnected = !!token && verified === true;
-  const isChecking = !!token && verified === null;
-  const isInvalid = !!token && verified === false;
+  const [tokenInput, setTokenInput] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [disconnecting, setDisconnecting] = useState(false);
+
+  const handleSaveToken = async () => {
+    if (!tokenInput.trim()) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const res = await fetch("/api/tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, token: tokenInput.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSaveError(data?.error ?? "Failed to save token");
+        return;
+      }
+      setTokenInput("");
+      onConnectionChange();
+    } catch {
+      setSaveError("Failed to save token");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    setDisconnecting(true);
+    try {
+      await fetch("/api/tokens", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider }),
+      });
+      onConnectionChange();
+    } catch {
+      // silently fail
+    } finally {
+      setDisconnecting(false);
+    }
+  };
 
   return (
     <div className="rounded-xl border border-white/60 bg-white/40 p-4">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-sm font-medium text-slate-700">{label}</span>
-        {isConnected && (
+        {connected && (
           <span className="flex items-center gap-1 text-xs font-medium text-green-700">
             <Check size={14} /> Connected
           </span>
         )}
-        {isChecking && (
-          <span className="flex items-center gap-1 text-xs font-medium text-slate-500">
-            <Loader2 size={14} className="animate-spin" /> Checking…
-          </span>
-        )}
-        {isInvalid && (
-          <span className="flex items-center gap-1 text-xs font-medium text-amber-700">
-            <XCircle size={14} /> Invalid token
-          </span>
-        )}
       </div>
 
-      {oauthAvailable && !isConnected && (
+      {connected && scopes && (
+        <p className="mb-2 text-xs text-slate-500">Scopes: {scopes}</p>
+      )}
+
+      {connected && (
+        <button
+          type="button"
+          onClick={handleDisconnect}
+          disabled={disconnecting}
+          className="mb-2 cursor-pointer rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 transition hover:bg-red-100 disabled:opacity-50"
+        >
+          {disconnecting ? "Disconnecting…" : "Disconnect"}
+        </button>
+      )}
+
+      {!connected && oauthAvailable && (
         <a
           href={oauthUrl}
           className="mb-2 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm text-white transition hover:bg-slate-800"
@@ -78,31 +128,41 @@ function IntegrationBlock({
         </a>
       )}
 
-      {oauthAvailable && isConnected && (
-        <button
-          type="button"
-          onClick={() => onTokenChange("")}
-          className="mb-2 cursor-pointer rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 transition hover:bg-red-100"
-        >
-          Disconnect
-        </button>
-      )}
-
-      {!oauthAvailable && (
+      {!connected && !oauthAvailable && (
         <>
           <p className="mb-2 text-xs text-slate-500">{envHint}</p>
-          <div className="mt-2">
+          <div className="mt-2 flex gap-2">
             <input
               type="password"
-              value={token}
-              onChange={(e) => onTokenChange(e.target.value)}
-              className="w-full rounded-xl border border-white/70 bg-white/50 px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-300"
+              value={tokenInput}
+              onChange={(e) => { setTokenInput(e.target.value); setSaveError(null); }}
+              className="flex-1 rounded-xl border border-white/70 bg-white/50 px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-300"
               placeholder={placeholder}
               autoComplete="off"
+              onKeyDown={(e) => { if (e.key === "Enter") handleSaveToken(); }}
             />
+            <button
+              type="button"
+              onClick={handleSaveToken}
+              disabled={saving || !tokenInput.trim()}
+              className="cursor-pointer rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
+            >
+              {saving ? <Loader2 size={14} className="animate-spin" /> : "Save"}
+            </button>
           </div>
+          {saveError && (
+            <p className="mt-2 flex items-center gap-1 text-xs text-amber-700">
+              <XCircle size={12} /> {saveError}
+            </p>
+          )}
         </>
       )}
+
+      {!connected && oauthAvailable && (
+        <p className="mt-2 text-xs text-slate-500">{envHint}</p>
+      )}
+
+      <p className="mt-2 text-xs text-slate-400">{scopeHint}</p>
     </div>
   );
 }
@@ -116,12 +176,11 @@ export function SettingsPanel({
   onAddPersona,
   onUpdatePersona,
   onRemovePersona,
-  githubToken,
-  onGithubTokenChange,
-  linearApiKey,
-  onLinearApiKeyChange,
-  githubVerified = null,
-  linearVerified = null
+  githubConnected,
+  linearConnected,
+  githubScopes,
+  linearScopes,
+  onConnectionChange,
 }: SettingsPanelProps) {
   return (
     <AnimatePresence>
@@ -216,23 +275,27 @@ export function SettingsPanel({
                 <div className="space-y-3">
                   <IntegrationBlock
                     label="GitHub"
-                    token={githubToken}
-                    onTokenChange={onGithubTokenChange}
+                    provider="github"
+                    connected={githubConnected}
+                    scopes={githubScopes}
                     oauthAvailable={githubOAuthAvailable}
                     oauthUrl="/api/auth/github"
                     placeholder="ghp_..."
-                    envHint="Set NEXT_PUBLIC_GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET to connect via OAuth, or use a personal token below."
-                    verified={githubVerified}
+                    envHint="Set NEXT_PUBLIC_GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET to connect via OAuth, or paste a personal token below."
+                    scopeHint="Recommended: Fine-grained PAT with repo:read scope."
+                    onConnectionChange={onConnectionChange}
                   />
                   <IntegrationBlock
                     label="Linear"
-                    token={linearApiKey}
-                    onTokenChange={onLinearApiKeyChange}
+                    provider="linear"
+                    connected={linearConnected}
+                    scopes={linearScopes}
                     oauthAvailable={linearOAuthAvailable}
                     oauthUrl="/api/auth/linear"
                     placeholder="lin_api_..."
-                    envHint="Set NEXT_PUBLIC_LINEAR_CLIENT_ID and LINEAR_CLIENT_SECRET to connect via OAuth, or use a personal token below."
-                    verified={linearVerified}
+                    envHint="Set NEXT_PUBLIC_LINEAR_CLIENT_ID and LINEAR_CLIENT_SECRET to connect via OAuth, or paste a personal token below."
+                    scopeHint="Recommended: Read-only API key."
+                    onConnectionChange={onConnectionChange}
                   />
                 </div>
                 <p className="mt-3 text-xs text-slate-500">

@@ -1,5 +1,6 @@
 import { Octokit } from "octokit";
 import { NextRequest, NextResponse } from "next/server";
+import { loadTokensForDevice } from "@/app/lib/tokens";
 
 const CADDY_REPO = process.env.GITHUB_CADDY_REPO ?? "getcaddy/caddy";
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
@@ -10,31 +11,37 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    let body: unknown;
+    let body: Record<string, unknown> = {};
     try {
-      body = await request.json();
+      const parsed = await request.json();
+      if (typeof parsed === "object" && parsed !== null) {
+        body = parsed as Record<string, unknown>;
+      }
     } catch {
-      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+      // Empty or invalid JSON body is OK — we'll try Supabase tokens
     }
 
-    if (typeof body !== "object" || body === null) {
-      return NextResponse.json(
-        { githubContent: "", linearContent: "" },
-        { status: 200 }
-      );
-    }
+    // Load tokens from Supabase (primary), with body fallback for dev/testing
+    const deviceTokens = await loadTokensForDevice(request).catch(() => ({} as { github?: string; linear?: string }));
 
-    const b = body as Record<string, unknown>;
-    // Support legacy { integration, apiKey } for backward compatibility
-    let githubApiKey = typeof b.githubApiKey === "string" ? b.githubApiKey.trim() : "";
-    let linearApiKey = typeof b.linearApiKey === "string" ? b.linearApiKey.trim() : "";
-    if (b.integration === "github" && typeof b.apiKey === "string" && b.apiKey.trim()) {
-      githubApiKey = (b.apiKey as string).trim();
+    let githubApiKey = deviceTokens.github ?? "";
+    let linearApiKey = deviceTokens.linear ?? "";
+
+    // Fallback: body tokens for dev/testing when Supabase isn't configured
+    if (!githubApiKey && typeof body.githubApiKey === "string" && body.githubApiKey.trim()) {
+      githubApiKey = body.githubApiKey.trim();
     }
-    if (b.integration === "linear" && typeof b.apiKey === "string" && b.apiKey.trim()) {
-      linearApiKey = (b.apiKey as string).trim();
+    if (!linearApiKey && typeof body.linearApiKey === "string" && body.linearApiKey.trim()) {
+      linearApiKey = body.linearApiKey.trim();
     }
-    // Optional server-side fallback
+    // Legacy { integration, apiKey } format
+    if (!githubApiKey && body.integration === "github" && typeof body.apiKey === "string" && body.apiKey.trim()) {
+      githubApiKey = (body.apiKey as string).trim();
+    }
+    if (!linearApiKey && body.integration === "linear" && typeof body.apiKey === "string" && body.apiKey.trim()) {
+      linearApiKey = (body.apiKey as string).trim();
+    }
+    // Env var fallback
     if (!githubApiKey && process.env.GITHUB_TOKEN) githubApiKey = process.env.GITHUB_TOKEN;
     if (!linearApiKey && process.env.LINEAR_API_KEY) linearApiKey = process.env.LINEAR_API_KEY;
 

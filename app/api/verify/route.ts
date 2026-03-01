@@ -31,41 +31,62 @@ export async function POST(request: NextRequest) {
     const token = apiKey.trim();
 
     if (integration === "github") {
-      const valid = await verifyGitHub(token);
-      return NextResponse.json({ valid });
+      const result = await verifyGitHub(token);
+      return NextResponse.json(result);
     }
 
-    const valid = await verifyLinear(token);
-    return NextResponse.json({ valid });
+    const result = await verifyLinear(token);
+    return NextResponse.json(result);
   } catch (err) {
     console.error("[verify]", err);
-    return NextResponse.json({ valid: false }, { status: 200 });
+    return NextResponse.json({ valid: false, scopes: [] }, { status: 200 });
   }
 }
 
-async function verifyGitHub(apiKey: string): Promise<boolean> {
+async function verifyGitHub(
+  apiKey: string
+): Promise<{ valid: boolean; scopes: string[]; scopeWarning?: string }> {
   try {
     const octokit = new Octokit({ auth: apiKey });
-    await octokit.rest.users.getAuthenticated();
-    return true;
+    const res = await octokit.rest.users.getAuthenticated();
+    const scopeHeader =
+      (res.headers as Record<string, string | undefined>)["x-oauth-scopes"] ?? "";
+    const scopes = scopeHeader
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const broadScopes = ["admin:org", "admin:repo_hook", "delete_repo", "admin:gpg_key"];
+    const hasBroad = scopes.filter((s) => broadScopes.includes(s));
+    const scopeWarning = hasBroad.length > 0
+      ? `Token has broad scopes (${hasBroad.join(", ")}). Consider using a fine-grained PAT with only repo:read.`
+      : undefined;
+
+    return { valid: true, scopes, scopeWarning };
   } catch {
-    return false;
+    return { valid: false, scopes: [] };
   }
 }
 
-async function verifyLinear(apiKey: string): Promise<boolean> {
+async function verifyLinear(
+  apiKey: string
+): Promise<{ valid: boolean; scopes: string[] }> {
   const authHeader = apiKey.startsWith("lin_") ? apiKey : `Bearer ${apiKey}`;
   const res = await fetch("https://api.linear.app/graphql", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: authHeader
+      Authorization: authHeader,
     },
-    body: JSON.stringify({ query: "query { viewer { id } }" })
+    body: JSON.stringify({ query: "query { viewer { id } }" }),
   });
 
-  if (!res.ok) return false;
+  if (!res.ok) return { valid: false, scopes: [] };
 
-  const json = (await res.json()) as { data?: { viewer?: { id: string } }; errors?: unknown[] };
-  return !json.errors?.length && !!json.data?.viewer?.id;
+  const json = (await res.json()) as {
+    data?: { viewer?: { id: string } };
+    errors?: unknown[];
+  };
+  const valid = !json.errors?.length && !!json.data?.viewer?.id;
+  return { valid, scopes: valid ? ["read"] : [] };
 }

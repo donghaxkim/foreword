@@ -1,7 +1,7 @@
 "use client";
 
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MessageSquarePlus, Settings } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
 
 import { AnimatedMesh } from "./components/AnimatedMesh";
 import { ChatbotIsland } from "./components/ChatbotIsland";
@@ -11,13 +11,16 @@ import { SuggestionChips } from "./components/SuggestionChips";
 import type { Mode, Persona } from "./components/types";
 import {
   DEFAULT_SYSTEM_PERSONA,
-  GITHUB_TOKEN_STORAGE_KEY,
-  LINEAR_API_KEY_STORAGE_KEY,
   PERSONAS_STORAGE_KEY,
   SELECTED_PERSONA_STORAGE_KEY,
   mapSuggestionToPrompt,
   mapSuggestionToVibe
 } from "./lib/constants";
+
+type TokenStatus = {
+  github: { connected: boolean; scopes: string } | null;
+  linear: { connected: boolean; scopes: string } | null;
+};
 
 export default function Home() {
   const [activeMode, setActiveMode] = useState<Mode>("Manual");
@@ -30,12 +33,13 @@ export default function Home() {
     { id: "default", name: "Caddy Chief of Staff", content: DEFAULT_SYSTEM_PERSONA }
   ]);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>("default");
-  const [githubToken, setGithubToken] = useState("");
-  const [linearApiKey, setLinearApiKey] = useState("");
-  const [githubVerified, setGithubVerified] = useState<boolean | null>(null);
-  const [linearVerified, setLinearVerified] = useState<boolean | null>(null);
-  const githubVerifyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const linearVerifyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Connection status from server (replaces client-side token state)
+  const [githubConnected, setGithubConnected] = useState(false);
+  const [linearConnected, setLinearConnected] = useState(false);
+  const [githubScopes, setGithubScopes] = useState("");
+  const [linearScopes, setLinearScopes] = useState("");
+
   const [loopsConfigured, setLoopsConfigured] = useState(false);
   const [loopsDefaultRecipient, setLoopsDefaultRecipient] = useState("");
   const [draft, setDraft] = useState<{ subject: string; preheader: string; body: string } | null>(null);
@@ -53,7 +57,24 @@ export default function Home() {
   const [directShipError, setDirectShipError] = useState<string | null>(null);
   const [directShipSuccess, setDirectShipSuccess] = useState(false);
 
-  // Handle post-OAuth redirect: open settings and clean URL
+  const tokenFetchRef = useRef(0);
+
+  const fetchTokenStatus = useCallback(async () => {
+    const id = ++tokenFetchRef.current;
+    try {
+      const res = await fetch("/api/tokens");
+      if (id !== tokenFetchRef.current) return;
+      const data = (await res.json()) as TokenStatus;
+      setGithubConnected(!!data.github?.connected);
+      setLinearConnected(!!data.linear?.connected);
+      setGithubScopes(data.github?.scopes ?? "");
+      setLinearScopes(data.linear?.scopes ?? "");
+    } catch {
+      // keep existing state
+    }
+  }, []);
+
+  // Handle post-OAuth redirect: open settings and refresh connection status
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
@@ -63,7 +84,7 @@ export default function Home() {
     }
   }, []);
 
-  // Load persisted state from localStorage
+  // Load persisted personas from localStorage
   useEffect(() => {
     if (typeof window === "undefined") return;
     const storedPersonas = localStorage.getItem(PERSONAS_STORAGE_KEY);
@@ -81,59 +102,16 @@ export default function Home() {
     }
     const storedId = localStorage.getItem(SELECTED_PERSONA_STORAGE_KEY);
     if (storedId != null) setSelectedPersonaId(storedId);
-    const github = localStorage.getItem(GITHUB_TOKEN_STORAGE_KEY);
-    if (github != null) setGithubToken(github);
-    const linear = localStorage.getItem(LINEAR_API_KEY_STORAGE_KEY);
-    if (linear != null) setLinearApiKey(linear);
+
+    // Clean up legacy token keys from localStorage
+    localStorage.removeItem("foreword-github-token");
+    localStorage.removeItem("foreword-linear-api-key");
   }, []);
 
-  // Verify GitHub token when it changes
+  // Fetch token connection status on mount
   useEffect(() => {
-    if (!githubToken.trim()) {
-      setGithubVerified(false);
-      return;
-    }
-    setGithubVerified(null);
-    if (githubVerifyTimeoutRef.current) clearTimeout(githubVerifyTimeoutRef.current);
-    githubVerifyTimeoutRef.current = setTimeout(() => {
-      githubVerifyTimeoutRef.current = null;
-      fetch("/api/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ integration: "github", apiKey: githubToken.trim() })
-      })
-        .then((res) => res.json())
-        .then((data: { valid?: boolean }) => setGithubVerified(!!data?.valid))
-        .catch(() => setGithubVerified(false));
-    }, 600);
-    return () => {
-      if (githubVerifyTimeoutRef.current) clearTimeout(githubVerifyTimeoutRef.current);
-    };
-  }, [githubToken]);
-
-  // Verify Linear token when it changes
-  useEffect(() => {
-    if (!linearApiKey.trim()) {
-      setLinearVerified(false);
-      return;
-    }
-    setLinearVerified(null);
-    if (linearVerifyTimeoutRef.current) clearTimeout(linearVerifyTimeoutRef.current);
-    linearVerifyTimeoutRef.current = setTimeout(() => {
-      linearVerifyTimeoutRef.current = null;
-      fetch("/api/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ integration: "linear", apiKey: linearApiKey.trim() })
-      })
-        .then((res) => res.json())
-        .then((data: { valid?: boolean }) => setLinearVerified(!!data?.valid))
-        .catch(() => setLinearVerified(false));
-    }, 600);
-    return () => {
-      if (linearVerifyTimeoutRef.current) clearTimeout(linearVerifyTimeoutRef.current);
-    };
-  }, [linearApiKey]);
+    fetchTokenStatus();
+  }, [fetchTokenStatus]);
 
   // Fetch server config (Loops availability and default recipient)
   useEffect(() => {
@@ -146,16 +124,16 @@ export default function Home() {
       .catch(() => {});
   }, []);
 
-  // Phase 1: Auto-sync when switching to GitHub/Linear mode
+  // Auto-sync when switching to GitHub/Linear mode
   useEffect(() => {
     if (activeMode === "Manual") {
       setSyncError(null);
       return;
     }
 
-    const apiKey = activeMode === "GitHub" ? githubToken : linearApiKey;
+    const isConnected = activeMode === "GitHub" ? githubConnected : linearConnected;
 
-    if (!apiKey) {
+    if (!isConnected) {
       const githubOAuth = !!process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID;
       const linearOAuth = !!process.env.NEXT_PUBLIC_LINEAR_CLIENT_ID;
       const useConnectCopy =
@@ -175,10 +153,7 @@ export default function Home() {
     fetch("/api/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        githubApiKey: githubToken || undefined,
-        linearApiKey: linearApiKey || undefined
-      })
+      body: JSON.stringify({})
     })
       .then(async (res) => {
         if (cancelled) return;
@@ -215,11 +190,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [activeMode, githubToken, linearApiKey]);
-
-  const persist = (key: string, value: string) => {
-    if (typeof window !== "undefined") localStorage.setItem(key, value);
-  };
+  }, [activeMode, githubConnected, linearConnected]);
 
   const savePersonas = (next: Persona[]) => {
     setPersonas(next);
@@ -307,7 +278,6 @@ export default function Home() {
     setDirectShipError(null);
   };
 
-  // Phase 3: Suggestion chips seed the textarea
   const handleSuggestionClick = (label: string) => {
     const isDeselecting = selectedSuggestion === label;
     setSelectedSuggestion(isDeselecting ? null : label);
@@ -334,7 +304,6 @@ export default function Home() {
     return "general";
   };
 
-  // Phase 4: Loops send handler (uses server-side Loops config)
   const handleSendViaLoops = async (recipientEmail: string) => {
     if (!draft || !recipientEmail) return;
     setSendLoading(true);
@@ -464,12 +433,11 @@ export default function Home() {
         onAddPersona={addPersona}
         onUpdatePersona={updatePersona}
         onRemovePersona={removePersona}
-        githubToken={githubToken}
-        onGithubTokenChange={(v) => { setGithubToken(v); persist(GITHUB_TOKEN_STORAGE_KEY, v); }}
-        linearApiKey={linearApiKey}
-        onLinearApiKeyChange={(v) => { setLinearApiKey(v); persist(LINEAR_API_KEY_STORAGE_KEY, v); }}
-        githubVerified={githubVerified}
-        linearVerified={linearVerified}
+        githubConnected={githubConnected}
+        linearConnected={linearConnected}
+        githubScopes={githubScopes}
+        linearScopes={linearScopes}
+        onConnectionChange={fetchTokenStatus}
       />
 
       {/* Main chat column */}
