@@ -11,24 +11,45 @@ import { SuggestionChips } from "./components/SuggestionChips";
 import type { Mode, Persona } from "./components/types";
 import {
   DEFAULT_SYSTEM_PERSONA,
-  GITHUB_REPO_STORAGE_KEY,
-  PERSONAS_STORAGE_KEY,
-  SELECTED_PERSONA_STORAGE_KEY,
   mapSuggestionToVibe
 } from "./lib/constants";
 
 type TokenStatus = {
   github: { connected: boolean; scopes: string } | null;
   linear: { connected: boolean; scopes: string } | null;
+  loops: { connected: boolean; scopes: string } | null;
+};
+
+type User = { id: string; email: string };
+
+type ChatHistoryItem = {
+  id: string;
+  prompt: string;
+  vibe: string | null;
+  subject: string | null;
+  preheader: string | null;
+  body: string | null;
+  created_at: string;
 };
 
 export default function Home() {
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+
   const [activeMode, setActiveMode] = useState<Mode>("Manual");
   const [inputValue, setInputValue] = useState("");
   const [hasStartedConversation, setHasStartedConversation] = useState(false);
   const [firstUserMessage, setFirstUserMessage] = useState<string | null>(null);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [personas, setPersonas] = useState<Persona[]>(() => [
     { id: "default", name: "Caddy Chief of Staff", content: DEFAULT_SYSTEM_PERSONA }
   ]);
@@ -37,8 +58,10 @@ export default function Home() {
   // Connection status from server (replaces client-side token state)
   const [githubConnected, setGithubConnected] = useState(false);
   const [linearConnected, setLinearConnected] = useState(false);
+  const [loopsConnected, setLoopsConnected] = useState(false);
   const [githubScopes, setGithubScopes] = useState("");
   const [linearScopes, setLinearScopes] = useState("");
+  const [loopsScopes, setLoopsScopes] = useState("");
 
   const [loopsConfigured, setLoopsConfigured] = useState(false);
   const [loopsDefaultRecipient, setLoopsDefaultRecipient] = useState("");
@@ -61,16 +84,47 @@ export default function Home() {
 
   const tokenFetchRef = useRef(0);
 
+  const loadUserSettings = useCallback(async () => {
+    const res = await fetch("/api/settings");
+    if (!res.ok) return;
+    const data = await res.json() as {
+      githubRepo?: string;
+      personas?: Persona[] | null;
+      selectedPersonaId?: string | null;
+    };
+    if (typeof data.githubRepo === "string") setGithubRepo(data.githubRepo);
+    if (Array.isArray(data.personas) && data.personas.length > 0) setPersonas(data.personas);
+    if (typeof data.selectedPersonaId === "string" || data.selectedPersonaId === null) {
+      setSelectedPersonaId(data.selectedPersonaId ?? "default");
+    }
+    setSettingsLoaded(true);
+  }, []);
+
+  const loadChatHistory = useCallback(async () => {
+    const res = await fetch("/api/chats?limit=50");
+    if (!res.ok) return;
+    const data = await res.json() as { chats?: ChatHistoryItem[] };
+    setChatHistory(data.chats ?? []);
+  }, []);
+
   const fetchTokenStatus = useCallback(async () => {
     const id = ++tokenFetchRef.current;
     try {
       const res = await fetch("/api/tokens");
+      if (res.status === 401) {
+        setGithubConnected(false);
+        setLinearConnected(false);
+        setLoopsConnected(false);
+        return;
+      }
       if (id !== tokenFetchRef.current) return;
       const data = (await res.json()) as TokenStatus;
       setGithubConnected(!!data.github?.connected);
       setLinearConnected(!!data.linear?.connected);
+      setLoopsConnected(!!data.loops?.connected);
       setGithubScopes(data.github?.scopes ?? "");
       setLinearScopes(data.linear?.scopes ?? "");
+      setLoopsScopes(data.loops?.scopes ?? "");
     } catch {
       // keep existing state
     }
@@ -86,47 +140,58 @@ export default function Home() {
     }
   }, []);
 
-  // Load persisted personas from localStorage
+  // Check auth session on mount
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const storedPersonas = localStorage.getItem(PERSONAS_STORAGE_KEY);
-    const legacyPersona = localStorage.getItem("foreword-system-persona");
-    if (storedPersonas != null) {
-      try {
-        const parsed = JSON.parse(storedPersonas) as Persona[];
-        if (Array.isArray(parsed) && parsed.length > 0) setPersonas(parsed);
-      } catch {
-        // ignore
-      }
-    } else if (legacyPersona != null) {
-      setPersonas([{ id: "default", name: "Caddy Chief of Staff", content: legacyPersona }]);
-      localStorage.removeItem("foreword-system-persona");
-    }
-    const storedId = localStorage.getItem(SELECTED_PERSONA_STORAGE_KEY);
-    if (storedId != null) setSelectedPersonaId(storedId);
-    const storedRepo = localStorage.getItem(GITHUB_REPO_STORAGE_KEY);
-    if (storedRepo != null) setGithubRepo(storedRepo);
-
-    // Clean up legacy token keys from localStorage
-    localStorage.removeItem("foreword-github-token");
-    localStorage.removeItem("foreword-linear-api-key");
+    fetch("/api/auth/session")
+      .then(async (res) => {
+        if (!res.ok) {
+          setUser(null);
+          setAuthLoading(false);
+          return;
+        }
+        const data = await res.json() as { user?: User };
+        if (data.user) setUser(data.user);
+        setAuthLoading(false);
+      })
+      .catch(() => {
+        setUser(null);
+        setAuthLoading(false);
+      });
   }, []);
 
-  // Fetch token connection status on mount
+  // Bootstrap user-scoped data after login
   useEffect(() => {
-    fetchTokenStatus();
-  }, [fetchTokenStatus]);
+    if (!user) return;
+    setSettingsLoaded(false);
+    Promise.all([fetchTokenStatus(), loadUserSettings(), loadChatHistory()])
+      .catch(() => {})
+      .finally(() => setSettingsLoaded(true));
+  }, [user, fetchTokenStatus, loadUserSettings, loadChatHistory]);
+
+  useEffect(() => {
+    if (!user || !settingsLoaded) return;
+    fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        githubRepo,
+        personas,
+        selectedPersonaId
+      })
+    }).catch(() => {});
+  }, [user, settingsLoaded, githubRepo, personas, selectedPersonaId]);
 
   // Fetch server config (Loops availability and default recipient)
   useEffect(() => {
+    if (!user) return;
     fetch("/api/config")
       .then((res) => res.json())
       .then((data: { loopsConfigured?: boolean; loopsDefaultRecipient?: string }) => {
-        if (data.loopsConfigured != null) setLoopsConfigured(data.loopsConfigured);
+        if (data.loopsConfigured != null) setLoopsConfigured(data.loopsConfigured || loopsConnected);
         if (data.loopsDefaultRecipient != null) setLoopsDefaultRecipient(data.loopsDefaultRecipient ?? "");
       })
       .catch(() => {});
-  }, []);
+  }, [user, loopsConnected]);
 
   // Auto-sync when switching to GitHub/Linear mode
   useEffect(() => {
@@ -194,17 +259,10 @@ export default function Home() {
     };
   }, [activeMode, githubConnected, linearConnected, syncDays, githubRepo]);
 
-  const savePersonas = (next: Persona[]) => {
-    setPersonas(next);
-    if (typeof window !== "undefined") localStorage.setItem(PERSONAS_STORAGE_KEY, JSON.stringify(next));
-  };
+  const savePersonas = (next: Persona[]) => setPersonas(next);
 
   const saveSelectedPersonaId = (id: string | null) => {
     setSelectedPersonaId(id);
-    if (typeof window !== "undefined") {
-      if (id == null) localStorage.removeItem(SELECTED_PERSONA_STORAGE_KEY);
-      else localStorage.setItem(SELECTED_PERSONA_STORAGE_KEY, id);
-    }
   };
 
   const addPersona = () => {
@@ -240,8 +298,30 @@ export default function Home() {
     setSendError(null);
     setDirectShipSuccess(false);
     setDirectShipError(null);
+    const vibe = mapSuggestionToVibe(selectedSuggestion);
+
+    let chatId = currentChatId;
+    if (!chatId) {
+      try {
+        const chatRes = await fetch("/api/chats", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: value, vibe })
+        });
+        if (chatRes.ok) {
+          const chatData = await chatRes.json() as { chat?: ChatHistoryItem };
+          if (chatData.chat) {
+            chatId = chatData.chat.id;
+            setCurrentChatId(chatData.chat.id);
+            setChatHistory((prev) => [chatData.chat!, ...prev.filter((c) => c.id !== chatData.chat!.id)]);
+          }
+        }
+      } catch {
+        // keep generating even if chat persistence fails
+      }
+    }
+
     try {
-      const vibe = mapSuggestionToVibe(selectedSuggestion);
       const body: Record<string, unknown> = {
         manualNotes: value,
         githubData: lastSyncedGithubContent ?? "",
@@ -259,7 +339,32 @@ export default function Home() {
         setGenerateError(data?.error ?? "Failed to generate email");
         return;
       }
-      setDraft({ subject: data.subject, preheader: data.preheader, body: data.body });
+      const nextDraft = { subject: data.subject, preheader: data.preheader, body: data.body };
+      setDraft(nextDraft);
+      if (chatId) {
+        fetch("/api/chats", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: chatId,
+            prompt: value,
+            vibe,
+            subject: nextDraft.subject,
+            preheader: nextDraft.preheader,
+            body: nextDraft.body
+          })
+        })
+          .then(async (chatRes) => {
+            if (!chatRes.ok) return;
+            const chatData = await chatRes.json() as { chat?: ChatHistoryItem };
+            if (!chatData.chat) return;
+            setChatHistory((prev) => [
+              chatData.chat!,
+              ...prev.filter((item) => item.id !== chatData.chat!.id)
+            ]);
+          })
+          .catch(() => {});
+      }
     } catch {
       setGenerateError("Failed to generate email");
     } finally {
@@ -270,6 +375,7 @@ export default function Home() {
   const handleNewChat = () => {
     setHasStartedConversation(false);
     setFirstUserMessage(null);
+    setCurrentChatId(null);
     setInputValue("");
     setSelectedSuggestion(null);
     setDraft(null);
@@ -387,30 +493,166 @@ export default function Home() {
 
   const vibeLabel = selectedSuggestion ? mapSuggestionToVibe(selectedSuggestion) : null;
 
+  const handleAuthSubmit = async () => {
+    if (!authEmail.trim() || !authPassword.trim()) {
+      setAuthError("Email and password are required.");
+      return;
+    }
+    setAuthSubmitting(true);
+    setAuthError(null);
+    try {
+      const endpoint = authMode === "signup" ? "/api/auth/signup" : "/api/auth/login";
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: authEmail.trim(), password: authPassword })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAuthError(data?.error ?? "Authentication failed.");
+        return;
+      }
+      setUser(data.user);
+      setAuthPassword("");
+      setAuthError(null);
+    } catch {
+      setAuthError("Could not reach the server.");
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+    setUser(null);
+    setChatHistory([]);
+    setHasStartedConversation(false);
+    setFirstUserMessage(null);
+    setDraft(null);
+  };
+
+  const openChat = (chat: ChatHistoryItem) => {
+    setCurrentChatId(chat.id);
+    setHasStartedConversation(true);
+    setFirstUserMessage(chat.prompt);
+    setSelectedSuggestion(chat.vibe ?? null);
+    if (chat.subject && chat.preheader && chat.body) {
+      setDraft({ subject: chat.subject, preheader: chat.preheader, body: chat.body });
+    } else {
+      setDraft(null);
+    }
+    setGenerateError(null);
+  };
+
+  if (authLoading) {
+    return (
+      <main className="relative flex min-h-screen items-center justify-center overflow-hidden text-slate-900">
+        <AnimatedMesh />
+        <div className="glass-card bg-white/40 backdrop-blur-xl relative z-10 w-full max-w-md rounded-2xl border border-white/50 p-6">
+          <p className="text-sm text-slate-600">Loading session...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (!user) {
+    return (
+      <main className="relative flex min-h-screen items-center justify-center overflow-hidden text-slate-900">
+        <AnimatedMesh />
+        <div className="glass-card bg-white/40 backdrop-blur-xl relative z-10 w-full max-w-md rounded-2xl border border-white/50 p-6">
+          <h1 className="text-xl font-semibold text-slate-900">
+            {authMode === "signup" ? "Create account" : "Log in"}
+          </h1>
+          <p className="mt-1 text-sm text-slate-600">
+            {authMode === "signup" ? "Sign up to save integrations and chat history." : "Log in to continue."}
+          </p>
+          <div className="mt-5 space-y-3">
+            <input
+              type="email"
+              value={authEmail}
+              onChange={(e) => setAuthEmail(e.target.value)}
+              placeholder="you@company.com"
+              className="w-full rounded-xl border border-white/70 bg-white/50 px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-300 focus:outline-none"
+            />
+            <input
+              type="password"
+              value={authPassword}
+              onChange={(e) => setAuthPassword(e.target.value)}
+              placeholder="At least 8 characters"
+              className="w-full rounded-xl border border-white/70 bg-white/50 px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-300 focus:outline-none"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleAuthSubmit();
+              }}
+            />
+            {authError && <p className="text-xs text-red-600">{authError}</p>}
+            <button
+              type="button"
+              onClick={handleAuthSubmit}
+              disabled={authSubmitting}
+              className="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
+            >
+              {authSubmitting ? "Please wait..." : authMode === "signup" ? "Sign up" : "Log in"}
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setAuthMode((prev) => (prev === "signup" ? "login" : "signup"));
+              setAuthError(null);
+            }}
+            className="mt-4 text-xs text-slate-600 underline decoration-dotted"
+          >
+            {authMode === "signup" ? "Already have an account? Log in" : "Need an account? Sign up"}
+          </button>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="relative flex min-h-screen overflow-hidden text-slate-900">
       <AnimatedMesh />
 
       {/* Left sidebar */}
-      <aside className="glass-card bg-white/30 backdrop-blur-xl relative z-10 hidden w-[260px] shrink-0 flex-col border-r border-white/50 md:flex">
-        <div className="flex items-center gap-2 px-4 py-5">
+      <aside className="glass-card bg-white/30 backdrop-blur-xl relative z-10 hidden h-screen w-[260px] shrink-0 flex-col overflow-hidden border-r border-white/50 md:flex">
+        <div className="flex items-center gap-2 px-4 py-5 shrink-0">
           <div className="font-brand text-xl text-slate-900">Foreword</div>
         </div>
         <button
           type="button"
           onClick={handleNewChat}
-          className="mx-3 mb-2 flex cursor-pointer items-center gap-2 rounded-xl border border-white/60 bg-white/40 px-3 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-white/60"
+          className="mx-3 mb-2 shrink-0 flex cursor-pointer items-center gap-2 rounded-xl border border-white/60 bg-white/40 px-3 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-white/60"
         >
           <MessageSquarePlus size={18} strokeWidth={1.6} />
           New chat
         </button>
+        <div className="px-3 pb-1 text-xs text-slate-500">{user.email}</div>
         <div className="flex-1 overflow-y-auto px-2 py-2">
           <p className="px-2 py-4 text-xs font-medium uppercase tracking-wider text-slate-400">
             Recent
           </p>
-          <p className="px-2 text-sm text-slate-400">No conversations yet</p>
+          {chatHistory.length === 0 ? (
+            <p className="px-2 text-sm text-slate-400">No conversations yet</p>
+          ) : (
+            <div className="space-y-1">
+              {chatHistory.map((chat) => (
+                <button
+                  key={chat.id}
+                  type="button"
+                  onClick={() => openChat(chat)}
+                  className={`w-full truncate rounded-lg px-2 py-2 text-left text-sm transition ${
+                    currentChatId === chat.id
+                      ? "bg-white/70 text-slate-900"
+                      : "text-slate-600 hover:bg-white/50"
+                  }`}
+                >
+                  {chat.prompt}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-        <div className="border-t border-white/40 p-3">
+        <div className="shrink-0 border-t border-white/40 p-3">
           <button
             type="button"
             aria-label="Settings"
@@ -419,6 +661,13 @@ export default function Home() {
           >
             <Settings size={18} strokeWidth={1.6} />
             Settings
+          </button>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="mt-2 w-full rounded-xl border border-white/60 bg-white/40 px-3 py-2 text-left text-sm text-slate-600 transition hover:bg-white/60"
+          >
+            Log out
           </button>
         </div>
       </aside>
@@ -434,14 +683,13 @@ export default function Home() {
         onRemovePersona={removePersona}
         githubConnected={githubConnected}
         linearConnected={linearConnected}
+        loopsConnected={loopsConnected}
         githubScopes={githubScopes}
         linearScopes={linearScopes}
+        loopsScopes={loopsScopes}
         onConnectionChange={fetchTokenStatus}
         githubRepo={githubRepo}
-        onGithubRepoChange={(v) => {
-          setGithubRepo(v);
-          if (typeof window !== "undefined") localStorage.setItem(GITHUB_REPO_STORAGE_KEY, v);
-        }}
+        onGithubRepoChange={(v) => setGithubRepo(v)}
       />
 
       {/* Main chat column */}

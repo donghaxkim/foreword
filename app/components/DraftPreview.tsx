@@ -330,7 +330,6 @@ export function DraftPreview({
                 </div>
               </div>
             </div>
-          </div>
         )}
         {!draft && !generateLoading && !generateError && (
           <>

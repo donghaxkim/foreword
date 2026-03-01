@@ -19,8 +19,10 @@ type SettingsPanelProps = {
   onRemovePersona: (id: string) => void;
   githubConnected: boolean;
   linearConnected: boolean;
+  loopsConnected: boolean;
   githubScopes: string;
   linearScopes: string;
+  loopsScopes: string;
   onConnectionChange: () => void;
   githubRepo?: string;
   onGithubRepoChange?: (v: string) => void;
@@ -39,11 +41,11 @@ function IntegrationBlock({
   onConnectionChange,
 }: {
   label: string;
-  provider: "github" | "linear";
+  provider: "github" | "linear" | "loops";
   connected: boolean;
   scopes: string;
   oauthAvailable: boolean;
-  oauthUrl: string;
+  oauthUrl?: string;
   placeholder: string;
   envHint: string;
   scopeHint: string;
@@ -152,7 +154,7 @@ function IntegrationBlock({
         </button>
       )}
 
-      {!connected && oauthAvailable && (
+      {!connected && oauthAvailable && oauthUrl && (
         <>
           <a
             href={oauthUrl}
@@ -198,8 +200,10 @@ export function SettingsPanel({
   onRemovePersona,
   githubConnected,
   linearConnected,
+  loopsConnected,
   githubScopes,
   linearScopes,
+  loopsScopes,
   onConnectionChange,
   githubRepo = "",
   onGithubRepoChange,
@@ -337,10 +341,18 @@ export function SettingsPanel({
                     scopeHint="Recommended: Read-only API key."
                     onConnectionChange={onConnectionChange}
                   />
+                  <IntegrationBlock
+                    label="Loops"
+                    provider="loops"
+                    connected={loopsConnected}
+                    scopes={loopsScopes}
+                    oauthAvailable={false}
+                    placeholder="loops_live_..."
+                    envHint="Paste your Loops API key here to enable sending."
+                    scopeHint="Recommended: API key used only for sending events."
+                    onConnectionChange={onConnectionChange}
+                  />
                 </div>
-                <p className="mt-3 text-xs text-slate-500">
-                  Loops sending is managed by server configuration in this workspace.
-                </p>
               </section>
             </div>
           </motion.div>

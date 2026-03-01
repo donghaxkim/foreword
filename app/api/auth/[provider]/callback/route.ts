@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getSessionUser } from "@/app/lib/auth";
 import { encrypt } from "@/app/lib/crypto";
-import { getOrCreateDeviceId } from "@/app/lib/device";
 import { getSupabase } from "@/app/lib/supabase";
 
 function htmlPage(title: string, body: string) {
@@ -83,10 +83,16 @@ export async function GET(
   // Encrypt and save token to Supabase
   const { ciphertext, iv, authTag } = encrypt(accessToken);
 
+  const user = await getSessionUser(request);
+  if (!user) {
+    return new NextResponse(errorPage("Please log in before connecting integrations."), {
+      status: 401,
+      headers: { "Content-Type": "text/html" }
+    });
+  }
+
   const redirectUrl = `${origin}/?connected=${provider}`;
   const response = NextResponse.redirect(redirectUrl);
-
-  const deviceId = getOrCreateDeviceId(request, response);
 
   // Determine scopes for display
   const scopes = provider === "github" ? "repo" : "read";
@@ -95,7 +101,7 @@ export async function GET(
     const supabase = getSupabase();
     await supabase.from("tokens").upsert(
       {
-        device_id: deviceId,
+        user_id: user.id,
         provider,
         encrypted_token: ciphertext,
         iv,

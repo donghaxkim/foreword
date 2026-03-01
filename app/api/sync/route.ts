@@ -1,5 +1,6 @@
 import { Octokit } from "octokit";
 import { NextRequest, NextResponse } from "next/server";
+import { getSessionUser } from "@/app/lib/auth";
 import { loadTokensForDevice } from "@/app/lib/tokens";
 
 const DEFAULT_SYNC_DAYS = 7;
@@ -31,6 +32,14 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
+    const user = await getSessionUser(request);
+    if (!user) {
+      return NextResponse.json(
+        { githubContent: "", linearContent: "", error: "Unauthorized" },
+        { status: 401 }
+      );
+    }
+
     let body: Record<string, unknown> = {};
     try {
       const parsed = await request.json();

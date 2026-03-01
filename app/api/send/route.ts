@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getSessionUser } from "@/app/lib/auth";
+import { loadTokensForDevice } from "@/app/lib/tokens";
 
 export async function POST(request: NextRequest) {
   try {
+    const user = await getSessionUser(request);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { subject, preheader, htmlBody, recipientEmail, targetGroup, loopsApiKey } =
       await request.json();
 
@@ -12,8 +19,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const tokenMap = await loadTokensForDevice(request);
     const apiKey =
-      (typeof loopsApiKey === "string" && loopsApiKey.trim()) || process.env.LOOPS_API_KEY;
+      tokenMap.loops ||
+      (typeof loopsApiKey === "string" && loopsApiKey.trim()) ||
+      process.env.LOOPS_API_KEY;
 
     if (!apiKey) {
       return NextResponse.json(

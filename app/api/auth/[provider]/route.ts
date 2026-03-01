@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getSessionUser } from "@/app/lib/auth";
 
 const GITHUB_AUTH_URL = "https://github.com/login/oauth/authorize";
 const LINEAR_AUTH_URL = "https://linear.app/oauth/authorize";
@@ -7,6 +8,11 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ provider: string }> }
 ) {
+  const user = await getSessionUser(request);
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { provider } = await params;
 
   if (provider !== "github" && provider !== "linear") {

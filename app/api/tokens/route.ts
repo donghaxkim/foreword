@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Octokit } from "octokit";
+import { getSessionUser } from "@/app/lib/auth";
 import { encrypt } from "@/app/lib/crypto";
-import { getDeviceId, getOrCreateDeviceId } from "@/app/lib/device";
 import { getSupabase } from "@/app/lib/supabase";
 
 async function verifyGitHub(
@@ -87,6 +87,15 @@ async function verifyLinear(
   }
 }
 
+function verifyLoops(
+  token: string
+): { valid: boolean; scopes: string; error?: string } {
+  if (!token.trim()) {
+    return { valid: false, scopes: "", error: "Loops API key is required." };
+  }
+  return { valid: true, scopes: "events:send" };
+}
+
 function checkServerConfig(): string | null {
   if (!process.env.TOKEN_ENCRYPTION_KEY || process.env.TOKEN_ENCRYPTION_KEY.length !== 64) {
     return "Server configuration error: TOKEN_ENCRYPTION_KEY is missing or invalid. The admin needs to set a 64-char hex string in the environment.";
@@ -101,35 +110,37 @@ export async function GET(request: NextRequest) {
   try {
     const configError = checkServerConfig();
     if (configError) {
-      return NextResponse.json({ github: null, linear: null });
+      return NextResponse.json({ github: null, linear: null, loops: null });
     }
 
-    const deviceId = getDeviceId(request);
-    if (!deviceId) {
-      return NextResponse.json({ github: null, linear: null });
+    const user = await getSessionUser(request);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const supabase = getSupabase();
     const { data: rows, error } = await supabase
       .from("tokens")
       .select("provider, scopes")
-      .eq("device_id", deviceId);
+      .eq("user_id", user.id);
 
     if (error) {
       console.error("[tokens] Supabase select error:", error.code, error.message);
-      return NextResponse.json({ github: null, linear: null });
+      return NextResponse.json({ github: null, linear: null, loops: null });
     }
 
     const github = rows?.find((r) => r.provider === "github");
     const linear = rows?.find((r) => r.provider === "linear");
+    const loops = rows?.find((r) => r.provider === "loops");
 
     return NextResponse.json({
       github: github ? { connected: true, scopes: github.scopes ?? "" } : null,
       linear: linear ? { connected: true, scopes: linear.scopes ?? "" } : null,
+      loops: loops ? { connected: true, scopes: loops.scopes ?? "" } : null,
     });
   } catch (err) {
     console.error("[tokens] GET error:", err);
-    return NextResponse.json({ github: null, linear: null });
+    return NextResponse.json({ github: null, linear: null, loops: null });
   }
 }
 
@@ -141,15 +152,15 @@ export async function POST(request: NextRequest) {
   }
 
   // Step 1: Parse input
-  let provider: string;
+  let provider: "github" | "linear" | "loops";
   let trimmedToken: string;
   try {
     const body = await request.json();
     const { provider: p, token: t } = body as Record<string, unknown>;
 
-    if (p !== "github" && p !== "linear") {
+    if (p !== "github" && p !== "linear" && p !== "loops") {
       return NextResponse.json(
-        { error: "provider must be 'github' or 'linear'" },
+        { error: "provider must be 'github', 'linear', or 'loops'" },
         { status: 400 }
       );
     }
@@ -159,16 +170,24 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    provider = p;
+    provider = p as "github" | "linear" | "loops";
     trimmedToken = t.trim();
   } catch {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
+  const user = await getSessionUser(request);
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   // Step 2: Verify token with the provider
-  const verification = provider === "github"
-    ? await verifyGitHub(trimmedToken)
-    : await verifyLinear(trimmedToken);
+  const verification =
+    provider === "github"
+      ? await verifyGitHub(trimmedToken)
+      : provider === "linear"
+        ? await verifyLinear(trimmedToken)
+        : verifyLoops(trimmedToken);
 
   if (!verification.valid) {
     return NextResponse.json(
@@ -232,11 +251,10 @@ export async function POST(request: NextRequest) {
     scopes: verification.scopes,
     connected: true,
   });
-  const deviceId = getOrCreateDeviceId(request, response);
 
   const { error: upsertError } = await supabase.from("tokens").upsert(
     {
-      device_id: deviceId,
+      user_id: user.id,
       provider,
       encrypted_token: encrypted.ciphertext,
       iv: encrypted.iv,
@@ -263,23 +281,23 @@ export async function DELETE(request: NextRequest) {
     const body = await request.json();
     const { provider } = body as Record<string, unknown>;
 
-    if (provider !== "github" && provider !== "linear") {
+    if (provider !== "github" && provider !== "linear" && provider !== "loops") {
       return NextResponse.json(
-        { error: "provider must be 'github' or 'linear'" },
+        { error: "provider must be 'github', 'linear', or 'loops'" },
         { status: 400 }
       );
     }
 
-    const deviceId = getDeviceId(request);
-    if (!deviceId) {
-      return NextResponse.json({ success: true });
+    const user = await getSessionUser(request);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const supabase = getSupabase();
     const { error } = await supabase
       .from("tokens")
       .delete()
-      .eq("device_id", deviceId)
+      .eq("user_id", user.id)
       .eq("provider", provider);
 
     if (error) {
