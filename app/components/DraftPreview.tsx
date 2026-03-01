@@ -1,9 +1,18 @@
 "use client";
 
 import { AnimatePresence } from "framer-motion";
-import { Check, CheckCircle, Rocket, Send } from "lucide-react";
+import { Check, CheckCircle, Eye, Rocket, Send } from "lucide-react";
 import { motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
+
+const GENERATING_PHRASES = [
+  "Generating...",
+  "Cooking...",
+  "Drafting...",
+  "Writing...",
+  "Polishing...",
+  "Almost there..."
+];
 
 type Draft = {
   subject: string;
@@ -50,7 +59,17 @@ export function DraftPreview({
 }: DraftPreviewProps) {
   const [recipientEmail, setRecipientEmail] = useState(defaultRecipientEmail);
   const [confirmShip, setConfirmShip] = useState(false);
+  const [previewMode, setPreviewMode] = useState(false);
+  const [generatingPhraseIndex, setGeneratingPhraseIndex] = useState(0);
   const hasAppliedDefault = useRef(false);
+
+  useEffect(() => {
+    if (!generateLoading) return;
+    const id = setInterval(() => {
+      setGeneratingPhraseIndex((i) => (i + 1) % GENERATING_PHRASES.length);
+    }, 2000);
+    return () => clearInterval(id);
+  }, [generateLoading]);
 
   useEffect(() => {
     if (defaultRecipientEmail && !hasAppliedDefault.current) {
@@ -80,37 +99,69 @@ export function DraftPreview({
     <div className="flex justify-start">
       <div className="glass-card bg-white/30 backdrop-blur-xl w-full max-w-3xl rounded-2xl border border-white/50 px-5 py-5">
         {generateLoading && (
-          <div className="flex flex-col items-center justify-center py-12">
-            <motion.span
-              className="text-base font-light text-slate-500"
-              animate={{ opacity: [0.5, 1, 0.5] }}
-              transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
-            >
-              Writing...
-            </motion.span>
-          </div>
+          <motion.p
+            key={generatingPhraseIndex}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-sm font-light text-slate-500"
+          >
+            {GENERATING_PHRASES[generatingPhraseIndex]}
+          </motion.p>
         )}
         {generateError && !generateLoading && (
           <p className="text-sm text-red-600">{generateError}</p>
         )}
         {draft && !generateLoading && (
           <div className="space-y-5">
-            <div>
-              <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-500">Subject</p>
-              <p className="text-sm font-medium text-slate-800">{draft.subject}</p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-medium uppercase tracking-wider text-slate-500">Draft</p>
+              <button
+                type="button"
+                onClick={() => setPreviewMode((p) => !p)}
+                className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
+                  previewMode
+                    ? "bg-slate-700 text-white"
+                    : "border border-white/60 bg-white/50 text-slate-600 hover:bg-white/70"
+                }`}
+              >
+                <Eye size={14} />
+                {previewMode ? "Preview on" : "Email preview"}
+              </button>
             </div>
-            <div>
-              <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-500">Preheader</p>
-              <p className="text-sm text-slate-700">{draft.preheader}</p>
-            </div>
-            <div>
-              <p className="mb-2 text-xs font-medium uppercase tracking-wider text-slate-500">Email Preview</p>
-              <div
-                className="min-h-[120px] rounded-xl border border-white/60 bg-white/40 p-4 text-sm text-slate-700 [&_p]:my-2 [&_ul]:my-2 [&_li]:my-0.5"
-                dangerouslySetInnerHTML={{ __html: draft.body }}
-              />
-              <div className="mt-3 flex flex-col gap-3">
-                <div className="flex items-center gap-2">
+
+            {previewMode ? (
+              <div className="rounded-xl border border-white/60 bg-white shadow-sm overflow-hidden">
+                <div className="border-b border-slate-200/80 bg-slate-50/80 px-4 py-3">
+                  <p className="text-sm font-semibold text-slate-900 truncate">{draft.subject}</p>
+                  <p className="mt-0.5 text-xs text-slate-500 line-clamp-1">{draft.preheader}</p>
+                </div>
+                <div
+                  className="max-w-[600px] mx-auto bg-white p-5 text-[15px] leading-relaxed text-slate-700 [&_p]:my-3 [&_ul]:my-3 [&_li]:my-1"
+                  dangerouslySetInnerHTML={{ __html: draft.body }}
+                />
+              </div>
+            ) : (
+              <>
+                <div>
+                  <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-500">Subject</p>
+                  <p className="text-sm font-medium text-slate-800">{draft.subject}</p>
+                </div>
+                <div>
+                  <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-500">Preheader</p>
+                  <p className="text-sm text-slate-700">{draft.preheader}</p>
+                </div>
+                <div>
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wider text-slate-500">Email Preview</p>
+                  <div
+                    className="min-h-[120px] rounded-xl border border-white/60 bg-white/40 p-4 text-sm text-slate-700 [&_p]:my-2 [&_ul]:my-2 [&_li]:my-0.5"
+                    dangerouslySetInnerHTML={{ __html: draft.body }}
+                  />
+                </div>
+              </>
+            )}
+
+            <div className="mt-3 flex flex-col gap-3">
+              <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={onCopyHtml}
