@@ -190,50 +190,72 @@ export async function POST(request: NextRequest) {
   }
 
   // Step 4: Save to Supabase
+  let supabase: ReturnType<typeof getSupabase>;
   try {
-    const response = NextResponse.json({
-      provider,
-      scopes: verification.scopes,
-      connected: true,
-    });
-    const deviceId = getOrCreateDeviceId(request, response);
-
-    const supabase = getSupabase();
-    const { error: upsertError } = await supabase.from("tokens").upsert(
-      {
-        device_id: deviceId,
-        provider,
-        encrypted_token: encrypted.ciphertext,
-        iv: encrypted.iv,
-        auth_tag: encrypted.authTag,
-        scopes: verification.scopes,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "device_id,provider" }
-    );
-
-    if (upsertError) {
-      console.error("[tokens] Supabase upsert error:", upsertError.code, upsertError.message);
-      if (upsertError.code === "42P01") {
-        return NextResponse.json(
-          { error: "Database error: the 'tokens' table does not exist. Run the migration in supabase/migrations/001_tokens.sql." },
-          { status: 500 }
-        );
-      }
-      return NextResponse.json(
-        { error: `Database error: ${upsertError.message}` },
-        { status: 500 }
-      );
-    }
-
-    return response;
+    supabase = getSupabase();
   } catch (err) {
-    console.error("[tokens] Save error:", (err as Error)?.message);
     return NextResponse.json(
-      { error: "Failed to save token to database. Check Supabase configuration." },
+      { error: `Supabase client error: ${(err as Error)?.message ?? "unknown"}` },
       { status: 500 }
     );
   }
+
+  // Pre-flight: verify we can reach Supabase and the table exists
+  const { error: probeError } = await supabase
+    .from("tokens")
+    .select("id")
+    .limit(0);
+
+  if (probeError) {
+    console.error("[tokens] Supabase probe error:", probeError.code, probeError.message, probeError.details);
+    if (probeError.code === "42P01" || probeError.message?.includes("does not exist")) {
+      return NextResponse.json(
+        { error: "The 'tokens' table does not exist in Supabase. Run the SQL in supabase/migrations/001_tokens.sql in your Supabase SQL Editor." },
+        { status: 500 }
+      );
+    }
+    if (probeError.code === "PGRST301" || probeError.message?.includes("JWT")) {
+      return NextResponse.json(
+        { error: `Supabase auth error: ${probeError.message}. Check that SUPABASE_SERVICE_ROLE_KEY is correct.` },
+        { status: 500 }
+      );
+    }
+    return NextResponse.json(
+      { error: `Supabase error (${probeError.code ?? "unknown"}): ${probeError.message}` },
+      { status: 500 }
+    );
+  }
+
+  // Upsert the encrypted token
+  const response = NextResponse.json({
+    provider,
+    scopes: verification.scopes,
+    connected: true,
+  });
+  const deviceId = getOrCreateDeviceId(request, response);
+
+  const { error: upsertError } = await supabase.from("tokens").upsert(
+    {
+      device_id: deviceId,
+      provider,
+      encrypted_token: encrypted.ciphertext,
+      iv: encrypted.iv,
+      auth_tag: encrypted.authTag,
+      scopes: verification.scopes,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "device_id,provider" }
+  );
+
+  if (upsertError) {
+    console.error("[tokens] Supabase upsert error:", upsertError.code, upsertError.message, upsertError.details);
+    return NextResponse.json(
+      { error: `Database write failed (${upsertError.code ?? "unknown"}): ${upsertError.message}` },
+      { status: 500 }
+    );
+  }
+
+  return response;
 }
 
 export async function DELETE(request: NextRequest) {
