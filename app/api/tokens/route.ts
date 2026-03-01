@@ -262,7 +262,7 @@ export async function POST(request: NextRequest) {
       scopes: verification.scopes,
       updated_at: new Date().toISOString(),
     },
-    { onConflict: "device_id,provider" }
+    { onConflict: "user_id,provider" }
   );
 
   if (upsertError) {
