@@ -199,20 +199,33 @@ async function fetchLinearContent(apiKey: string, days: number): Promise<string>
     body: JSON.stringify({ query, variables: { since } })
   });
 
-  if (!res.ok) {
-    const text = await res.text();
-    console.error("[sync] Linear API error", res.status, text);
-    throw new Error("Linear fetch failed");
-  }
-
-  const json = (await res.json()) as {
+  const rawText = await res.text();
+  let json: {
     data?: { issues?: { nodes?: Array<{ title: string; description?: string | null; state?: { name: string }; updatedAt?: string }> } };
     errors?: Array<{ message: string }>;
   };
+  try {
+    json = rawText ? (JSON.parse(rawText) as typeof json) : {};
+  } catch {
+    json = {};
+  }
+
+  if (!res.ok) {
+    console.error("[sync] Linear API error", res.status, rawText.slice(0, 200));
+    if (res.status === 401) {
+      throw new Error("Linear: Unauthorized. Check that your API key or OAuth token is valid and not expired.");
+    }
+    if (res.status === 403) {
+      throw new Error("Linear: Forbidden. Your token may not have permission to read issues.");
+    }
+    const msg = (json.errors?.[0]?.message ?? rawText.slice(0, 100)) || `HTTP ${res.status}`;
+    throw new Error(`Linear: ${msg}`);
+  }
 
   if (json.errors?.length) {
     console.error("[sync] Linear GraphQL errors", json.errors);
-    throw new Error("Linear query failed");
+    const msg = json.errors[0]?.message ?? "GraphQL error";
+    throw new Error(`Linear: ${msg}`);
   }
 
   const nodes = json.data?.issues?.nodes ?? [];
