@@ -11,7 +11,6 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { SuggestionChips } from "./components/SuggestionChips";
 import type { Mode, Persona } from "./components/types";
 import {
-  DEFAULT_SYSTEM_PERSONA,
   mapSuggestionToVibe
 } from "./lib/constants";
 import { runPreflightCheck } from "./lib/preflight";
@@ -52,10 +51,8 @@ export default function Home() {
   const [selectedSuggestion, setSelectedSuggestion] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
-  const [personas, setPersonas] = useState<Persona[]>(() => [
-    { id: "default", name: "Caddy Chief of Staff", content: DEFAULT_SYSTEM_PERSONA }
-  ]);
-  const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>("default");
+  const [personas, setPersonas] = useState<Persona[]>([]);
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
 
   // Connection status from server (replaces client-side token state)
   const [githubConnected, setGithubConnected] = useState(false);
@@ -102,7 +99,7 @@ export default function Home() {
     if (typeof data.githubRepo === "string") setGithubRepo(data.githubRepo);
     if (Array.isArray(data.personas) && data.personas.length > 0) setPersonas(data.personas);
     if (typeof data.selectedPersonaId === "string" || data.selectedPersonaId === null) {
-      setSelectedPersonaId(data.selectedPersonaId ?? "default");
+      setSelectedPersonaId(data.selectedPersonaId);
     }
     setSettingsLoaded(true);
   }, []);
@@ -252,6 +249,7 @@ export default function Home() {
   useEffect(() => {
     if (activeMode === "Manual") {
       setSyncError(null);
+      setSyncLoading(false);
       return;
     }
 
@@ -322,7 +320,7 @@ export default function Home() {
 
   const addPersona = () => {
     const id = `persona-${Date.now()}`;
-    const next = [...personas, { id, name: "New persona", content: DEFAULT_SYSTEM_PERSONA }];
+    const next = [...personas, { id, name: "New persona", content: "" }];
     savePersonas(next);
     saveSelectedPersonaId(id);
   };
@@ -707,8 +705,8 @@ export default function Home() {
                   type="button"
                   onClick={() => openChat(chat)}
                   className={`w-full truncate rounded-lg px-2 py-2 text-left text-sm transition ${currentChatId === chat.id
-                      ? "bg-white/70 text-slate-900"
-                      : "text-slate-600 hover:bg-white/50"
+                    ? "bg-white/70 text-slate-900"
+                    : "text-slate-600 hover:bg-white/50"
                     }`}
                 >
                   {chat.prompt}
