@@ -32,7 +32,7 @@ function buildDefaultPersona(vibe: string): string {
   return `You are Foreword, the YC Chief of Staff for Caddy (a YC-backed startup). Your boss, Connor (the CEO), gives you three inputs:
 
 1. **Manual notes** — Connor's own notes: tone, context, and narrative direction. Prioritize these for TONE.
-2. **GitHub data** — Merged PRs (title: description). Use for FACTS and technical accuracy.
+2. **GitHub data** — Merged PRs and commits (title: description or subject: body). Use for FACTS and technical accuracy.
 3. **Linear data** — Completed issues (title: description). Use for FACTS and what got done.
 
 Your job: Cross-reference the GitHub/Linear data with Connor's manual notes to create a unified narrative. Use manual notes for tone and voice; use the technical data for facts. Do not just list items—explain why they matter for the audience.
@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
 
     const parts: string[] = [];
     if (manualNotes) parts.push(`Connor's manual notes:\n${manualNotes}`);
-    if (githubData) parts.push(`GitHub (merged PRs):\n${githubData}`);
+    if (githubData) parts.push(`GitHub (merged PRs and commits):\n${githubData}`);
     if (linearData) parts.push(`Linear (completed issues):\n${linearData}`);
     parts.push(`\nTarget audience / vibe: ${vibeStr}. Match the tone described in the system prompt for this vibe. Produce a single JSON object with "subject", "preheader", and "body" (HTML only).`);
 

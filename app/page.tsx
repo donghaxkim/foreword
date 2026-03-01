@@ -48,6 +48,7 @@ export default function Home() {
   const [copySuccess, setCopySuccess] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncDays, setSyncDays] = useState<number>(7);
   const [lastSyncedGithubContent, setLastSyncedGithubContent] = useState("");
   const [lastSyncedLinearContent, setLastSyncedLinearContent] = useState("");
   const [sendLoading, setSendLoading] = useState(false);
@@ -153,7 +154,7 @@ export default function Home() {
     fetch("/api/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({})
+      body: JSON.stringify({ days: syncDays })
     })
       .then(async (res) => {
         if (cancelled) return;
@@ -190,7 +191,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [activeMode, githubConnected, linearConnected]);
+  }, [activeMode, githubConnected, linearConnected, syncDays]);
 
   const savePersonas = (next: Persona[]) => {
     setPersonas(next);
@@ -461,6 +462,8 @@ export default function Home() {
                   fixed={false}
                   syncLoading={syncLoading}
                   syncError={syncError}
+                  syncDays={syncDays}
+                  setSyncDays={setSyncDays}
                 />
                 <SuggestionChips
                   selectedSuggestion={selectedSuggestion}
@@ -518,6 +521,8 @@ export default function Home() {
               fixed={true}
               syncLoading={syncLoading}
               syncError={syncError}
+              syncDays={syncDays}
+              setSyncDays={setSyncDays}
             />
           </>
         )}

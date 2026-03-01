@@ -4,6 +4,8 @@ import { motion } from "framer-motion";
 import { useLayoutEffect, useRef } from "react";
 import { type Mode, modes } from "./types";
 
+const SYNC_DAY_OPTIONS = [7, 14, 30] as const;
+
 type ChatbotIslandProps = {
   activeMode: Mode;
   setActiveMode: (m: Mode) => void;
@@ -13,6 +15,8 @@ type ChatbotIslandProps = {
   fixed?: boolean;
   syncLoading?: boolean;
   syncError?: string | null;
+  syncDays?: number;
+  setSyncDays?: (days: number) => void;
 };
 
 const MAX_TEXTAREA_ROWS = 5;
@@ -26,7 +30,9 @@ export function ChatbotIsland({
   onSubmit,
   fixed = false,
   syncLoading = false,
-  syncError = null
+  syncError = null,
+  syncDays = 7,
+  setSyncDays
 }: ChatbotIslandProps) {
   const formRef = useRef<HTMLFormElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -68,24 +74,49 @@ export function ChatbotIsland({
 
   const content = (
     <form ref={formRef} onSubmit={handleSubmit} className="mx-auto flex max-w-3xl flex-col gap-3">
-      <div className="flex gap-2">
-        {modes.map((mode) => {
-          const isActive = activeMode === mode;
-          return (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => setActiveMode(mode)}
-              className={`cursor-pointer rounded-full px-3 py-1.5 text-sm transition ${
-                isActive
-                  ? "bg-slate-900 text-white shadow-sm"
-                  : "border border-white/70 bg-white/45 text-slate-600 hover:bg-white/65"
-              }`}
-            >
-              {mode}
-            </button>
-          );
-        })}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex gap-2">
+          {modes.map((mode) => {
+            const isActive = activeMode === mode;
+            return (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setActiveMode(mode)}
+                className={`cursor-pointer rounded-full px-3 py-1.5 text-sm transition ${
+                  isActive
+                    ? "bg-slate-900 text-white shadow-sm"
+                    : "border border-white/70 bg-white/45 text-slate-600 hover:bg-white/65"
+                }`}
+              >
+                {mode}
+              </button>
+            );
+          })}
+        </div>
+        {(activeMode === "GitHub" || activeMode === "Linear") && setSyncDays && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">Time frame:</span>
+            {SYNC_DAY_OPTIONS.map((d) => {
+              const isActive = syncDays === d;
+              return (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setSyncDays(d)}
+                  disabled={syncLoading}
+                  className={`cursor-pointer rounded-full px-2.5 py-1 text-xs transition disabled:opacity-50 ${
+                    isActive
+                      ? "bg-slate-700 text-white"
+                      : "border border-white/60 bg-white/40 text-slate-600 hover:bg-white/60"
+                  }`}
+                >
+                  {d} days
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
       {syncError && (
         <p className="text-sm text-amber-700">{syncError}</p>

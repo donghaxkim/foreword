@@ -3,7 +3,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { loadTokensForDevice } from "@/app/lib/tokens";
 
 const CADDY_REPO = process.env.GITHUB_CADDY_REPO ?? "getcaddy/caddy";
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_SYNC_DAYS = 7;
+const MIN_SYNC_DAYS = 1;
+const MAX_SYNC_DAYS = 90;
+
+function parseSyncDays(body: Record<string, unknown>): number {
+  const raw = body.days;
+  if (raw === undefined || raw === null) return DEFAULT_SYNC_DAYS;
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n)) return DEFAULT_SYNC_DAYS;
+  return Math.max(MIN_SYNC_DAYS, Math.min(MAX_SYNC_DAYS, Math.floor(n)));
+}
 
 export async function GET() {
   return NextResponse.json({ error: "Method not allowed" }, { status: 405 });
@@ -45,6 +55,8 @@ export async function POST(request: NextRequest) {
     if (!githubApiKey && process.env.GITHUB_TOKEN) githubApiKey = process.env.GITHUB_TOKEN;
     if (!linearApiKey && process.env.LINEAR_API_KEY) linearApiKey = process.env.LINEAR_API_KEY;
 
+    const syncDays = parseSyncDays(body);
+
     const result: {
       githubContent: string;
       linearContent: string;
@@ -53,8 +65,8 @@ export async function POST(request: NextRequest) {
     } = { githubContent: "", linearContent: "" };
 
     const [githubResult, linearResult] = await Promise.allSettled([
-      githubApiKey ? fetchGitHubContent(githubApiKey) : Promise.resolve(""),
-      linearApiKey ? fetchLinearContent(linearApiKey) : Promise.resolve("")
+      githubApiKey ? fetchGitHubContent(githubApiKey, syncDays) : Promise.resolve(""),
+      linearApiKey ? fetchLinearContent(linearApiKey, syncDays) : Promise.resolve("")
     ]);
 
     if (githubResult.status === "fulfilled") {
@@ -81,25 +93,41 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function fetchGitHubContent(apiKey: string): Promise<string> {
+async function fetchGitHubContent(apiKey: string, days: number): Promise<string> {
   const [owner, repo] = CADDY_REPO.split("/");
   if (!owner || !repo) {
     return "Invalid GITHUB_CADDY_REPO. Use owner/repo.";
   }
 
+  const rangeMs = days * 24 * 60 * 60 * 1000;
+  const cutoff = new Date(Date.now() - rangeMs);
+  const sinceIso = cutoff.toISOString();
+  const dayLabel = days === 1 ? "last day" : `last ${days} days`;
+
   const octokit = new Octokit({ auth: apiKey });
-  const cutoff = new Date(Date.now() - SEVEN_DAYS_MS);
 
-  const { data: pulls } = await octokit.rest.pulls.list({
-    owner,
-    repo,
-    state: "closed",
-    sort: "updated",
-    direction: "desc",
-    per_page: 100
-  });
+  // Fetch merged PRs and commits in parallel
+  const [pullsRes, commitsRes] = await Promise.all([
+    octokit.rest.pulls.list({
+      owner,
+      repo,
+      state: "closed",
+      sort: "updated",
+      direction: "desc",
+      per_page: 100
+    }),
+    octokit.rest.repos.listCommits({
+      owner,
+      repo,
+      since: sinceIso,
+      per_page: 100
+    })
+  ]);
 
-  const lines = pulls
+  const pulls = pullsRes.data;
+  const commits = commitsRes.data;
+
+  const prLines = pulls
     .filter(
       (pr): pr is typeof pr & { merged_at: string } =>
         pr.merged_at != null && new Date(pr.merged_at) >= cutoff
@@ -110,14 +138,34 @@ async function fetchGitHubContent(apiKey: string): Promise<string> {
       return `${title}: ${desc}`;
     });
 
-  if (lines.length === 0) {
-    return "No merged PRs in the last 7 days.";
+  // commit.commit.message is "Subject\n\nBody" or just "Subject"
+  const commitLines = commits.map((c) => {
+    const msg = c.commit?.message ?? "";
+    const firstNewline = msg.indexOf("\n\n");
+    const subject = firstNewline === -1 ? msg.trim() : msg.slice(0, firstNewline).trim();
+    const body = firstNewline === -1 ? "" : msg.slice(firstNewline + 2).trim().replace(/\s+/g, " ");
+    return body ? `${subject}: ${body}` : subject;
+  });
+
+  const sections: string[] = [];
+  if (prLines.length > 0) {
+    sections.push(`Merged PRs (${dayLabel}):\n` + prLines.join("\n"));
   }
-  return lines.join("\n");
+  if (commitLines.length > 0) {
+    sections.push(`Commits (${dayLabel}):\n` + commitLines.join("\n"));
+  }
+
+  if (sections.length === 0) {
+    return `No merged PRs or commits in the ${dayLabel}.`;
+  }
+  return sections.join("\n\n");
 }
 
-async function fetchLinearContent(apiKey: string): Promise<string> {
-  const since = new Date(Date.now() - SEVEN_DAYS_MS).toISOString();
+async function fetchLinearContent(apiKey: string, days: number): Promise<string> {
+  const rangeMs = days * 24 * 60 * 60 * 1000;
+  const since = new Date(Date.now() - rangeMs).toISOString();
+  const dayLabel = days === 1 ? "last day" : `last ${days} days`;
+
   const query = `
     query SyncDoneIssues($since: DateTime!) {
       issues(
@@ -175,7 +223,7 @@ async function fetchLinearContent(apiKey: string): Promise<string> {
   });
 
   if (lines.length === 0) {
-    return "No completed issues updated in the last 7 days.";
+    return `No completed issues updated in the ${dayLabel}.`;
   }
   return lines.join("\n");
 }
