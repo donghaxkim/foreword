@@ -51,6 +51,7 @@ function IntegrationBlock({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [showManualInput, setShowManualInput] = useState(false);
 
   const handleSaveToken = async () => {
     if (!tokenInput.trim()) return;
@@ -68,9 +69,10 @@ function IntegrationBlock({
         return;
       }
       setTokenInput("");
+      setShowManualInput(false);
       onConnectionChange();
     } catch {
-      setSaveError("Failed to save token");
+      setSaveError("Could not reach the server. Check your connection and try again.");
     } finally {
       setSaving(false);
     }
@@ -91,6 +93,36 @@ function IntegrationBlock({
       setDisconnecting(false);
     }
   };
+
+  const tokenInputBlock = (
+    <>
+      <div className="mt-2 flex gap-2">
+        <input
+          type="password"
+          value={tokenInput}
+          onChange={(e) => { setTokenInput(e.target.value); setSaveError(null); }}
+          className="flex-1 rounded-xl border border-white/70 bg-white/50 px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-300"
+          placeholder={placeholder}
+          autoComplete="off"
+          onKeyDown={(e) => { if (e.key === "Enter") handleSaveToken(); }}
+        />
+        <button
+          type="button"
+          onClick={handleSaveToken}
+          disabled={saving || !tokenInput.trim()}
+          className="cursor-pointer rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
+        >
+          {saving ? <Loader2 size={14} className="animate-spin" /> : "Save"}
+        </button>
+      </div>
+      {saveError && (
+        <p className="mt-2 text-xs leading-snug text-red-600">
+          <XCircle size={12} className="mr-1 inline-block shrink-0 align-text-top" />
+          {saveError}
+        </p>
+      )}
+    </>
+  );
 
   return (
     <div className="rounded-xl border border-white/60 bg-white/40 p-4">
@@ -119,47 +151,33 @@ function IntegrationBlock({
       )}
 
       {!connected && oauthAvailable && (
-        <a
-          href={oauthUrl}
-          className="mb-2 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm text-white transition hover:bg-slate-800"
-        >
-          <ExternalLink size={14} />
-          Connect {label}
-        </a>
+        <>
+          <a
+            href={oauthUrl}
+            className="mb-2 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm text-white transition hover:bg-slate-800"
+          >
+            <ExternalLink size={14} />
+            Connect {label}
+          </a>
+          {!showManualInput ? (
+            <button
+              type="button"
+              onClick={() => setShowManualInput(true)}
+              className="mt-1 block cursor-pointer text-xs text-slate-500 underline decoration-dotted hover:text-slate-700"
+            >
+              Or paste a token manually
+            </button>
+          ) : (
+            tokenInputBlock
+          )}
+        </>
       )}
 
       {!connected && !oauthAvailable && (
         <>
           <p className="mb-2 text-xs text-slate-500">{envHint}</p>
-          <div className="mt-2 flex gap-2">
-            <input
-              type="password"
-              value={tokenInput}
-              onChange={(e) => { setTokenInput(e.target.value); setSaveError(null); }}
-              className="flex-1 rounded-xl border border-white/70 bg-white/50 px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-300"
-              placeholder={placeholder}
-              autoComplete="off"
-              onKeyDown={(e) => { if (e.key === "Enter") handleSaveToken(); }}
-            />
-            <button
-              type="button"
-              onClick={handleSaveToken}
-              disabled={saving || !tokenInput.trim()}
-              className="cursor-pointer rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
-            >
-              {saving ? <Loader2 size={14} className="animate-spin" /> : "Save"}
-            </button>
-          </div>
-          {saveError && (
-            <p className="mt-2 flex items-center gap-1 text-xs text-amber-700">
-              <XCircle size={12} /> {saveError}
-            </p>
-          )}
+          {tokenInputBlock}
         </>
-      )}
-
-      {!connected && oauthAvailable && (
-        <p className="mt-2 text-xs text-slate-500">{envHint}</p>
       )}
 
       <p className="mt-2 text-xs text-slate-400">{scopeHint}</p>

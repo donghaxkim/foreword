@@ -45,16 +45,21 @@ export async function POST(request: NextRequest) {
 
 async function verifyGitHub(
   apiKey: string
-): Promise<{ valid: boolean; scopes: string[]; scopeWarning?: string }> {
+): Promise<{ valid: boolean; scopes: string[]; scopeWarning?: string; error?: string }> {
   try {
     const octokit = new Octokit({ auth: apiKey });
     const res = await octokit.rest.users.getAuthenticated();
-    const scopeHeader =
-      (res.headers as Record<string, string | undefined>)["x-oauth-scopes"] ?? "";
-    const scopes = scopeHeader
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const headers = res.headers as Record<string, string | undefined>;
+    const oauthScopes = headers["x-oauth-scopes"];
+
+    let scopes: string[];
+    if (oauthScopes !== undefined && oauthScopes !== "") {
+      scopes = oauthScopes.split(",").map((s) => s.trim()).filter(Boolean);
+    } else if (apiKey.startsWith("github_pat_")) {
+      scopes = ["fine-grained"];
+    } else {
+      scopes = ["valid"];
+    }
 
     const broadScopes = ["admin:org", "admin:repo_hook", "delete_repo", "admin:gpg_key"];
     const hasBroad = scopes.filter((s) => broadScopes.includes(s));
@@ -63,30 +68,51 @@ async function verifyGitHub(
       : undefined;
 
     return { valid: true, scopes, scopeWarning };
-  } catch {
-    return { valid: false, scopes: [] };
+  } catch (err: unknown) {
+    const status = (err as { status?: number })?.status;
+    if (status === 401) {
+      return { valid: false, scopes: [], error: "Token rejected (401). It may be expired or revoked." };
+    }
+    if (status === 403) {
+      return { valid: false, scopes: [], error: "Token forbidden (403). It may lack required permissions." };
+    }
+    return { valid: false, scopes: [], error: (err as Error)?.message ?? "Verification failed" };
   }
 }
 
 async function verifyLinear(
   apiKey: string
-): Promise<{ valid: boolean; scopes: string[] }> {
-  const authHeader = apiKey.startsWith("lin_") ? apiKey : `Bearer ${apiKey}`;
-  const res = await fetch("https://api.linear.app/graphql", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: authHeader,
-    },
-    body: JSON.stringify({ query: "query { viewer { id } }" }),
-  });
+): Promise<{ valid: boolean; scopes: string[]; error?: string }> {
+  try {
+    const authHeader = apiKey.startsWith("lin_") ? apiKey : `Bearer ${apiKey}`;
+    const res = await fetch("https://api.linear.app/graphql", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: authHeader,
+      },
+      body: JSON.stringify({ query: "query { viewer { id } }" }),
+    });
 
-  if (!res.ok) return { valid: false, scopes: [] };
+    if (res.status === 401 || res.status === 403) {
+      return { valid: false, scopes: [], error: `Linear rejected token (${res.status}).` };
+    }
+    if (!res.ok) {
+      return { valid: false, scopes: [], error: `Linear API status ${res.status}.` };
+    }
 
-  const json = (await res.json()) as {
-    data?: { viewer?: { id: string } };
-    errors?: unknown[];
-  };
-  const valid = !json.errors?.length && !!json.data?.viewer?.id;
-  return { valid, scopes: valid ? ["read"] : [] };
+    const json = (await res.json()) as {
+      data?: { viewer?: { id: string } };
+      errors?: Array<{ message?: string }>;
+    };
+
+    if (json.errors?.length) {
+      return { valid: false, scopes: [], error: json.errors[0]?.message ?? "GraphQL error" };
+    }
+
+    const valid = !!json.data?.viewer?.id;
+    return { valid, scopes: valid ? ["read"] : [] };
+  } catch (err: unknown) {
+    return { valid: false, scopes: [], error: (err as Error)?.message ?? "Network error" };
+  }
 }
