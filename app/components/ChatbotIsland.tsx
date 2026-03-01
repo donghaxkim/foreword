@@ -148,7 +148,7 @@ export function ChatbotIsland({
                 formRef.current?.requestSubmit();
               }
             }}
-            className="min-h-[48px] w-full resize-none overflow-y-auto rounded-2xl border border-white/70 bg-white/60 px-5 py-3 text-[15px] font-light leading-6 text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-slate-300 focus:bg-white/85 focus:ring-0"
+            className="min-h-[48px] w-full resize-none overflow-y-auto rounded-2xl border border-white/70 bg-white/60 px-5 py-3 text-[15px] font-light leading-6 text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-slate-300 focus:bg-white/85 focus:ring-0 scrollbar-hide"
             style={{ height: "auto", maxHeight: MAX_TEXTAREA_ROWS * LINE_HEIGHT_PX }}
           />
         </label>
@@ -156,9 +156,9 @@ export function ChatbotIsland({
           type="submit"
           disabled={!hasContent}
           aria-label="Generate"
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-sm transition hover:bg-slate-800 disabled:pointer-events-none disabled:opacity-50"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white shadow-sm transition hover:bg-slate-800 disabled:pointer-events-none disabled:opacity-50"
         >
-          <ArrowRight size={20} strokeWidth={2} />
+          <ArrowRight size={16} strokeWidth={2} />
         </button>
       </div>
       {hasContent && (

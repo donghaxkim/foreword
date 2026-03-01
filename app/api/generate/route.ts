@@ -45,6 +45,8 @@ function extractJson(text: string): string {
   const trimmed = text.trim();
   const codeBlock = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (codeBlock) return codeBlock[1].trim();
+  const objectMatch = trimmed.match(/\{[\s\S]*\}/);
+  if (objectMatch) return objectMatch[0];
   return trimmed;
 }
 
@@ -136,7 +138,13 @@ export async function POST(request: NextRequest) {
     if (!rawContent) throw new Error("AI returned no content");
 
     const jsonStr = extractJson(rawContent);
-    const parsed = JSON.parse(jsonStr) as { subject?: string; preheader?: string; body?: string };
+    let parsed: { subject?: string; preheader?: string; body?: string };
+    try {
+      parsed = JSON.parse(jsonStr) as { subject?: string; preheader?: string; body?: string };
+    } catch {
+      console.error("[Foreword API] Invalid JSON from model:", jsonStr.slice(0, 500));
+      throw new Error("Model returned invalid JSON. Please try again.");
+    }
 
     const result = {
       subject: stripInadvertentMarkdown(parsed.subject ?? ""),
@@ -148,9 +156,19 @@ export async function POST(request: NextRequest) {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("[Foreword API Error]:", message);
-    return NextResponse.json(
-      { error: "Generation failed. Please try again." },
-      { status: 500 }
-    );
+
+    const isAuthError =
+      typeof message === "string" &&
+      (message.includes("API key") || message.includes("authentication") || message.includes("401"));
+    const isModelError =
+      typeof message === "string" &&
+      (message.includes("model") || message.includes("404") || message.includes("invalid"));
+    const userMessage = isAuthError
+      ? "API key missing or invalid. Set ANTHROPIC_API_KEY in your environment."
+      : isModelError
+        ? "Model unavailable. Try again later."
+        : "Generation failed. Please try again.";
+
+    return NextResponse.json({ error: userMessage }, { status: 500 });
   }
 }

@@ -447,7 +447,7 @@ export default function Home() {
       {/* Main chat column */}
       <div className="relative z-10 flex flex-1 flex-col min-h-0">
         {!hasStartedConversation ? (
-          <div className="flex flex-1 flex-col overflow-y-auto">
+          <div className="flex flex-1 flex-col overflow-y-auto scrollbar-hide">
             <div className="mx-auto flex min-h-full w-full max-w-3xl flex-1 flex-col px-4 pt-10 pb-8">
               <div className="flex flex-1 flex-col items-center justify-center gap-8 py-8">
                 <div className="mb-2 mt-16 text-center">
@@ -478,7 +478,7 @@ export default function Home() {
         ) : (
           <>
             <div
-              className="flex-1 overflow-y-auto"
+              className="flex-1 overflow-y-auto scrollbar-hide"
               style={{ paddingBottom: "220px" }}
             >
               <div className="mx-auto max-w-3xl px-4 py-8">

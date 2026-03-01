@@ -35,3 +35,12 @@ body {
     0 8px 24px rgba(15, 23, 42, 0.06),
     inset 0 1px 0 rgba(255, 255, 255, 0.38);
 }
+
+/* Hide scrollbar while keeping scroll behavior */
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
