@@ -6,6 +6,7 @@ import { MessageSquarePlus, Settings } from "lucide-react";
 import { AnimatedMesh } from "./components/AnimatedMesh";
 import { ChatbotIsland } from "./components/ChatbotIsland";
 import { DraftPreview } from "./components/DraftPreview";
+import type { LoopsList } from "./components/RecipientSelector";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { SuggestionChips } from "./components/SuggestionChips";
 import type { Mode, Persona } from "./components/types";
@@ -82,6 +83,11 @@ export default function Home() {
   const [directShipLoading, setDirectShipLoading] = useState(false);
   const [directShipError, setDirectShipError] = useState<string | null>(null);
   const [directShipSuccess, setDirectShipSuccess] = useState(false);
+
+  // Mailing lists state
+  const [loopsLists, setLoopsLists] = useState<LoopsList[]>([]);
+  const [selectedListIds, setSelectedListIds] = useState<string[]>([]);
+  const [listsLoading, setListsLoading] = useState(false);
 
   const tokenFetchRef = useRef(0);
 
@@ -165,7 +171,7 @@ export default function Home() {
     if (!user) return;
     setSettingsLoaded(false);
     Promise.all([fetchTokenStatus(), loadUserSettings(), loadChatHistory()])
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setSettingsLoaded(true));
   }, [user, fetchTokenStatus, loadUserSettings, loadChatHistory]);
 
@@ -193,7 +199,7 @@ export default function Home() {
           setLastSyncedLinearContent(data.linearContent ?? "");
         }
       })
-      .catch(() => {});
+      .catch(() => { });
 
     return () => {
       cancelled = true;
@@ -210,7 +216,7 @@ export default function Home() {
         personas,
         selectedPersonaId
       })
-    }).catch(() => {});
+    }).catch(() => { });
   }, [user, settingsLoaded, githubRepo, personas, selectedPersonaId]);
 
   // Fetch server config (Loops availability and default recipient)
@@ -222,8 +228,25 @@ export default function Home() {
         if (data.loopsConfigured != null) setLoopsConfigured(data.loopsConfigured || loopsConnected);
         if (data.loopsDefaultRecipient != null) setLoopsDefaultRecipient(data.loopsDefaultRecipient ?? "");
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [user, loopsConnected]);
+
+  // Fetch mailing lists from Loops when configured
+  useEffect(() => {
+    if (!user || !loopsConfigured) return;
+    setListsLoading(true);
+    fetch("/api/lists")
+      .then(async (res) => {
+        if (!res.ok) return;
+        const data = await res.json() as { lists?: LoopsList[] };
+        const lists = data.lists ?? [];
+        setLoopsLists(lists);
+        // Auto-select all lists on first load
+        setSelectedListIds(lists.map((l) => l.id));
+      })
+      .catch(() => { })
+      .finally(() => setListsLoading(false));
+  }, [user, loopsConfigured]);
 
   // Auto-sync when switching to GitHub/Linear mode
   useEffect(() => {
@@ -361,15 +384,15 @@ export default function Home() {
     try {
       const body: Record<string, unknown> = isRefinement
         ? {
-            refinementInstruction: value.trim(),
-            currentDraft: { subject: draft!.subject, preheader: draft!.preheader, body: draft!.body }
-          }
+          refinementInstruction: value.trim(),
+          currentDraft: { subject: draft!.subject, preheader: draft!.preheader, body: draft!.body }
+        }
         : {
-            manualNotes: value,
-            githubData: lastSyncedGithubContent ?? "",
-            linearData: lastSyncedLinearContent ?? "",
-            vibe
-          };
+          manualNotes: value,
+          githubData: lastSyncedGithubContent ?? "",
+          linearData: lastSyncedLinearContent ?? "",
+          vibe
+        };
       if (!isRefinement && activePersonaContent) (body as Record<string, unknown>).systemPersona = activePersonaContent;
       const res = await fetch("/api/generate", {
         method: "POST",
@@ -405,7 +428,7 @@ export default function Home() {
               ...prev.filter((item) => item.id !== chatData.chat!.id)
             ]);
           })
-          .catch(() => {});
+          .catch(() => { });
       }
     } catch {
       setGenerateError(isRefinement ? "Failed to refine draft" : "Failed to generate email");
@@ -444,11 +467,18 @@ export default function Home() {
     }
   };
 
-  const vibeToTargetGroup = (vibe: string): string => {
-    const lower = vibe.toLowerCase();
-    if (lower.includes("investor")) return "investors";
-    if (lower.includes("beta") || lower.includes("tester")) return "private-beta";
-    return "general";
+  const handleToggleList = (id: string) => {
+    setSelectedListIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAllLists = () => {
+    setSelectedListIds(loopsLists.map((l) => l.id));
+  };
+
+  const handleDeselectAllLists = () => {
+    setSelectedListIds([]);
   };
 
   const handleSendViaLoops = async (recipientEmail: string) => {
@@ -457,8 +487,6 @@ export default function Home() {
     setSendError(null);
     setSendSuccess(false);
     try {
-      const vibe = mapSuggestionToVibe(selectedSuggestion);
-      const targetGroup = vibeToTargetGroup(vibe);
       const res = await fetch("/api/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -467,7 +495,7 @@ export default function Home() {
           preheader: draft.preheader,
           htmlBody: draft.body,
           recipientEmail,
-          targetGroup
+          selectedListIds
         })
       });
       if (!res.ok) {
@@ -489,21 +517,12 @@ export default function Home() {
     }
   };
 
-  const vibeToGroupLabel = (vibe: string): string => {
-    const lower = vibe.toLowerCase();
-    if (lower.includes("investor")) return "Investors";
-    if (lower.includes("beta") || lower.includes("tester")) return "Private Beta";
-    return "General";
-  };
-
   const handleDirectShip = async () => {
-    if (!draft) return;
+    if (!draft || selectedListIds.length === 0) return;
     setDirectShipLoading(true);
     setDirectShipError(null);
     setDirectShipSuccess(false);
     try {
-      const vibe = mapSuggestionToVibe(selectedSuggestion);
-      const targetGroup = vibeToTargetGroup(vibe);
       const res = await fetch("/api/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -511,7 +530,7 @@ export default function Home() {
           subject: draft.subject,
           preheader: draft.preheader,
           htmlBody: draft.body,
-          targetGroup
+          selectedListIds
         })
       });
       if (!res.ok) {
@@ -570,7 +589,7 @@ export default function Home() {
   };
 
   const handleLogout = async () => {
-    await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => { });
     setUser(null);
     setChatHistory([]);
     setHasStartedConversation(false);
@@ -687,11 +706,10 @@ export default function Home() {
                   key={chat.id}
                   type="button"
                   onClick={() => openChat(chat)}
-                  className={`w-full truncate rounded-lg px-2 py-2 text-left text-sm transition ${
-                    currentChatId === chat.id
+                  className={`w-full truncate rounded-lg px-2 py-2 text-left text-sm transition ${currentChatId === chat.id
                       ? "bg-white/70 text-slate-900"
                       : "text-slate-600 hover:bg-white/50"
-                  }`}
+                    }`}
                 >
                   {chat.prompt}
                 </button>
@@ -803,7 +821,12 @@ export default function Home() {
                   sendLoading={sendLoading}
                   sendError={sendError}
                   sendSuccess={sendSuccess}
-                  targetGroupLabel={vibeToGroupLabel(mapSuggestionToVibe(selectedSuggestion))}
+                  loopsLists={loopsLists}
+                  listsLoading={listsLoading}
+                  selectedListIds={selectedListIds}
+                  onToggleList={handleToggleList}
+                  onSelectAllLists={handleSelectAllLists}
+                  onDeselectAllLists={handleDeselectAllLists}
                   onDirectShip={handleDirectShip}
                   directShipLoading={directShipLoading}
                   directShipError={directShipError}

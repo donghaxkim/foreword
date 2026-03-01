@@ -9,7 +9,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { subject, preheader, htmlBody, recipientEmail, targetGroup, loopsApiKey } =
+    const { subject, preheader, htmlBody, recipientEmail, targetGroup, selectedListIds, loopsApiKey } =
       await request.json();
 
     if (!htmlBody || !subject) {
@@ -32,15 +32,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const listIds: string[] = Array.isArray(selectedListIds) ? selectedListIds : [];
+
     const eventPayload: Record<string, unknown> = {
       eventName: "newsletter_ship",
       eventProperties: {
         subject: subject ?? "",
         preheader: preheader ?? "",
         htmlBody: htmlBody,
-        targetGroup: typeof targetGroup === "string" ? targetGroup : "general"
-      }
+        targetGroup: typeof targetGroup === "string" ? targetGroup : "general",
+        selectedListIds: listIds.join(","),
+      },
     };
+
+    // Tag the contact with the selected mailing lists
+    if (listIds.length > 0) {
+      eventPayload.mailingLists = Object.fromEntries(
+        listIds.map((id: string) => [id, true])
+      );
+    }
 
     if (typeof recipientEmail === "string" && recipientEmail.trim()) {
       eventPayload.email = recipientEmail.trim();
@@ -69,6 +79,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       targetGroup: typeof targetGroup === "string" ? targetGroup : "general",
+      selectedListIds: listIds,
       ...data
     });
   } catch {

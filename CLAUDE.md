@@ -22,7 +22,8 @@ Next.js App Router app (single page). Source lives in `app/`.
 - `ChatbotIsland.tsx` — input form with mode tabs, sync loading/error states
 - `SettingsPanel.tsx` — slide-over settings (personas, Integrations: Connect GitHub/Linear)
 - `SuggestionChips.tsx` — clickable suggestion chips that seed the textarea
-- `DraftPreview.tsx` — draft results card with copy HTML + Loops send
+- `DraftPreview.tsx` — draft results card with copy HTML + Loops send + recipient selector
+- `RecipientSelector.tsx` — checkbox-toggle mailing list selector (fetched from Loops)
 
 **Lib** (`app/lib/`):
 - `constants.ts` — storage keys, default persona, vibe chips (`vibeChips`), `mapSuggestionToVibe`
@@ -33,7 +34,8 @@ Next.js App Router app (single page). Source lives in `app/`.
 - `POST /api/generate` — sends user prompt + system persona to Anthropic (Claude) and returns `{ subject, preheader, body }`. The body is HTML using only `<p>`, `<ul>`, `<li>`, `<strong>` tags. Uses server-side `ANTHROPIC_API_KEY` env var only.
 - `GET /api/config` — returns `{ loopsConfigured, loopsDefaultRecipient }` from server env (no secrets). Used by the client to show the Send via Loops UI and pre-fill default recipient.
 - `POST /api/sync` — fetches recent data from GitHub (merged PRs and commits) or Linear (done issues). Accepts `{ days?, repo? }`. GitHub repo is set by the user in Settings (owner/repo); tokens from OAuth or manual entry. Auto-triggered when switching to GitHub/Linear mode.
-- `POST /api/send` — proxies email send to Loops.so transactional API. Uses server-side `LOOPS_API_KEY` and `LOOPS_TRANSACTIONAL_ID`. Accepts only `{ subject, preheader, htmlBody, recipientEmail }`.
+- `POST /api/send` — broadcasts newsletter via Loops.so Events API (`newsletter_ship` event). Uses server-side `LOOPS_API_KEY` or per-user key from Settings. Accepts `{ subject, preheader, htmlBody, recipientEmail?, selectedListIds? }`. Passes `selectedListIds` in event properties and `mailingLists` for contact tagging.
+- `GET /api/lists` — proxies to Loops `GET /v1/lists`. Returns mailing lists `{ id, name, description, isPublic }` for the recipient selector UI.
 - `GET /api/auth/[provider]` — initiates OAuth flow for `github` or `linear`. Sets a CSRF state cookie and redirects to the provider's authorization page.
 - `GET /api/auth/[provider]/callback` — handles OAuth callback, exchanges authorization code for access token, stores token in localStorage via an HTML bridge page, and redirects to `/`.
 
