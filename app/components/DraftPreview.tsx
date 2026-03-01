@@ -37,6 +37,10 @@ type DraftPreviewProps = {
   directShipLoading: boolean;
   directShipError: string | null;
   directShipSuccess: boolean;
+  /** Pre-flight check passed; when false, Ship buttons are disabled. */
+  preflightOk?: boolean;
+  /** Issues found by pre-flight (placeholders, broken links). */
+  preflightIssues?: string[];
 };
 
 export function DraftPreview({
@@ -55,7 +59,9 @@ export function DraftPreview({
   onDirectShip,
   directShipLoading,
   directShipError,
-  directShipSuccess
+  directShipSuccess,
+  preflightOk = true,
+  preflightIssues = []
 }: DraftPreviewProps) {
   const [recipientEmail, setRecipientEmail] = useState(defaultRecipientEmail);
   const [confirmShip, setConfirmShip] = useState(false);
@@ -84,7 +90,7 @@ export function DraftPreview({
     }
   }, [directShipLoading, directShipSuccess]);
 
-  const canSend = loopsConfigured && recipientEmail.trim();
+  const canSend = loopsConfigured && recipientEmail.trim() && preflightOk;
 
   const handleDirectShipClick = () => {
     if (!confirmShip) {
@@ -231,7 +237,7 @@ export function DraftPreview({
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            disabled={!loopsConfigured}
+                            disabled={!loopsConfigured || !preflightOk}
                             onClick={handleDirectShipClick}
                             className={`inline-flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
                               confirmShip
@@ -254,6 +260,11 @@ export function DraftPreview({
                         </div>
                         {directShipError && (
                           <p className="mt-1 text-xs text-red-600">{directShipError}</p>
+                        )}
+                        {!preflightOk && preflightIssues.length > 0 && (
+                          <p className="mt-1 text-xs text-amber-700">
+                            Pre-flight: {preflightIssues.join("; ")}
+                          </p>
                         )}
                       </motion.div>
                     )}
@@ -320,6 +331,11 @@ export function DraftPreview({
                         </div>
                         {!loopsConfigured && (
                           <p className="mt-1 text-xs text-amber-700">Loops is not configured on the server.</p>
+                        )}
+                        {!preflightOk && preflightIssues.length > 0 && (
+                          <p className="mt-1 text-xs text-amber-700">
+                            Pre-flight: {preflightIssues.join("; ")}
+                          </p>
                         )}
                         {sendError && (
                           <p className="mt-1 text-xs text-red-600">{sendError}</p>

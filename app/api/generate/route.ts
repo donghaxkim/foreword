@@ -70,6 +70,8 @@ function stripInadvertentMarkdown(str: string): string {
   return out;
 }
 
+const REFINEMENT_SYSTEM = `You are an expert email editor. You will receive the current draft (subject, preheader, HTML body) and Connor's feedback. Your job is to apply the feedback and output an updated draft as a single JSON object with keys "subject", "preheader", and "body". Keep the same HTML structure (only <p>, <ul>, <li>, <strong>). Change only what the feedback asks for. Output valid JSON only, no other text.`;
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as Record<string, unknown>;
@@ -79,8 +81,21 @@ export async function POST(request: NextRequest) {
       linearData: rawLinearData,
       prompt: legacyPrompt,
       vibe,
-      systemPersona
+      systemPersona,
+      refinementInstruction: rawRefinement,
+      currentDraft: rawCurrentDraft
     } = body;
+
+    const refinementInstruction = typeof rawRefinement === "string" ? rawRefinement.trim() : "";
+    const currentDraft = rawCurrentDraft && typeof rawCurrentDraft === "object" && !Array.isArray(rawCurrentDraft)
+      ? rawCurrentDraft as { subject?: string; preheader?: string; body?: string }
+      : null;
+
+    const isRefinement = refinementInstruction.length > 0 && currentDraft && (
+      typeof currentDraft.subject === "string" &&
+      typeof currentDraft.preheader === "string" &&
+      typeof currentDraft.body === "string"
+    );
 
     // Backward compatibility: if new fields missing, use prompt as manualNotes
     const manualNotes =
@@ -102,33 +117,50 @@ export async function POST(request: NextRequest) {
     }
 
     const vibeStr = typeof vibe === "string" && vibe.trim() ? vibe.trim() : "General";
-    if (!manualNotes && !githubData && !linearData) {
+    if (!isRefinement && !manualNotes && !githubData && !linearData) {
       return NextResponse.json(
-        { error: "At least one of manualNotes, githubData, or linearData is required." },
+        { error: "At least one of manualNotes, githubData, or linearData is required (or use refinementInstruction + currentDraft)." },
         { status: 400 }
       );
     }
 
     const anthropic = new Anthropic({ apiKey });
 
-    const activePersona = systemPersona && typeof systemPersona === "string" && systemPersona.trim()
-      ? systemPersona.trim()
-      : buildDefaultPersona(vibeStr);
+    let userMessage: string;
 
-    const fullSystemPrompt = `${activePersona}\n\n${TECHNICAL_CONSTRAINTS}`;
+    if (isRefinement) {
+      userMessage = `Current draft:
 
-    const parts: string[] = [];
-    if (manualNotes) parts.push(`Connor's manual notes:\n${manualNotes}`);
-    if (githubData) parts.push(`GitHub (merged PRs and commits):\n${githubData}`);
-    if (linearData) parts.push(`Linear (completed issues):\n${linearData}`);
-    parts.push(`\nTarget audience / vibe: ${vibeStr}. Match the tone described in the system prompt for this vibe. Produce a single JSON object with "subject", "preheader", and "body" (HTML only).`);
+Subject: ${currentDraft!.subject ?? ""}
+Preheader: ${currentDraft!.preheader ?? ""}
+Body (HTML):\n${currentDraft!.body ?? ""}
 
-    const userMessage = parts.join("\n\n---\n\n");
+Connor's feedback: ${refinementInstruction}
+
+Produce the updated draft as a single JSON object with "subject", "preheader", and "body" (HTML only).`;
+    } else {
+      const parts: string[] = [];
+      if (manualNotes) parts.push(`Connor's manual notes:\n${manualNotes}`);
+      if (githubData) parts.push(`GitHub (merged PRs and commits):\n${githubData}`);
+      if (linearData) parts.push(`Linear (completed issues):\n${linearData}`);
+      parts.push(`\nTarget audience / vibe: ${vibeStr}. Match the tone described in the system prompt for this vibe. Produce a single JSON object with "subject", "preheader", and "body" (HTML only).`);
+
+      userMessage = parts.join("\n\n---\n\n");
+    }
+
+    const systemPrompt = isRefinement
+      ? `${REFINEMENT_SYSTEM}\n\n${TECHNICAL_CONSTRAINTS}`
+      : (() => {
+          const activePersona = systemPersona && typeof systemPersona === "string" && systemPersona.trim()
+            ? systemPersona.trim()
+            : buildDefaultPersona(vibeStr);
+          return `${activePersona}\n\n${TECHNICAL_CONSTRAINTS}`;
+        })();
 
     const message = await anthropic.messages.create({
       model: ANTHROPIC_MODEL,
       max_tokens: 1024,
-      system: fullSystemPrompt,
+      system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
       temperature: 0.7,
     });

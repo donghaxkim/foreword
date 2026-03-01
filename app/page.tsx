@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MessageSquarePlus, Settings } from "lucide-react";
 
 import { AnimatedMesh } from "./components/AnimatedMesh";
@@ -13,6 +13,7 @@ import {
   DEFAULT_SYSTEM_PERSONA,
   mapSuggestionToVibe
 } from "./lib/constants";
+import { runPreflightCheck } from "./lib/preflight";
 
 type TokenStatus = {
   github: { connected: boolean; scopes: string } | null;
@@ -168,6 +169,37 @@ export default function Home() {
       .finally(() => setSettingsLoaded(true));
   }, [user, fetchTokenStatus, loadUserSettings, loadChatHistory]);
 
+  // Background sync: fetch GitHub/Linear data on login so generation is instant when switching mode
+  useEffect(() => {
+    if (!user || !settingsLoaded) return;
+    const canSyncGitHub = githubConnected && githubRepo.trim();
+    const canSyncLinear = linearConnected;
+    if (!canSyncGitHub && !canSyncLinear) return;
+
+    let cancelled = false;
+    fetch("/api/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ days: syncDays, repo: githubRepo.trim() || undefined })
+    })
+      .then(async (res) => {
+        if (cancelled) return;
+        const data = await res.json() as {
+          githubContent?: string;
+          linearContent?: string;
+        };
+        if (res.ok) {
+          setLastSyncedGithubContent(data.githubContent ?? "");
+          setLastSyncedLinearContent(data.linearContent ?? "");
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, settingsLoaded, githubConnected, linearConnected, syncDays, githubRepo]);
+
   useEffect(() => {
     if (!user || !settingsLoaded) return;
     fetch("/api/settings", {
@@ -288,10 +320,7 @@ export default function Home() {
   const activePersonaContent = selectedPersona?.content?.trim() ?? "";
 
   const handleSubmit = async (value: string) => {
-    setFirstUserMessage(value);
     setInputValue("");
-    setHasStartedConversation(true);
-    setDraft(null);
     setGenerateError(null);
     setGenerateLoading(true);
     setSendSuccess(false);
@@ -300,8 +329,16 @@ export default function Home() {
     setDirectShipError(null);
     const vibe = mapSuggestionToVibe(selectedSuggestion);
 
+    const isRefinement = !!draft && value.trim().length > 0;
+
+    if (!isRefinement) {
+      setFirstUserMessage(value);
+      setHasStartedConversation(true);
+      setDraft(null);
+    }
+
     let chatId = currentChatId;
-    if (!chatId) {
+    if (!isRefinement && !chatId) {
       try {
         const chatRes = await fetch("/api/chats", {
           method: "POST",
@@ -322,13 +359,18 @@ export default function Home() {
     }
 
     try {
-      const body: Record<string, unknown> = {
-        manualNotes: value,
-        githubData: lastSyncedGithubContent ?? "",
-        linearData: lastSyncedLinearContent ?? "",
-        vibe
-      };
-      if (activePersonaContent) body.systemPersona = activePersonaContent;
+      const body: Record<string, unknown> = isRefinement
+        ? {
+            refinementInstruction: value.trim(),
+            currentDraft: { subject: draft!.subject, preheader: draft!.preheader, body: draft!.body }
+          }
+        : {
+            manualNotes: value,
+            githubData: lastSyncedGithubContent ?? "",
+            linearData: lastSyncedLinearContent ?? "",
+            vibe
+          };
+      if (!isRefinement && activePersonaContent) (body as Record<string, unknown>).systemPersona = activePersonaContent;
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -336,7 +378,7 @@ export default function Home() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setGenerateError(data?.error ?? "Failed to generate email");
+        setGenerateError(data?.error ?? (isRefinement ? "Failed to refine draft" : "Failed to generate email"));
         return;
       }
       const nextDraft = { subject: data.subject, preheader: data.preheader, body: data.body };
@@ -347,7 +389,7 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             id: chatId,
-            prompt: value,
+            prompt: isRefinement ? firstUserMessage : value,
             vibe,
             subject: nextDraft.subject,
             preheader: nextDraft.preheader,
@@ -366,7 +408,7 @@ export default function Home() {
           .catch(() => {});
       }
     } catch {
-      setGenerateError("Failed to generate email");
+      setGenerateError(isRefinement ? "Failed to refine draft" : "Failed to generate email");
     } finally {
       setGenerateLoading(false);
     }
@@ -492,6 +534,11 @@ export default function Home() {
   };
 
   const vibeLabel = selectedSuggestion ? mapSuggestionToVibe(selectedSuggestion) : null;
+
+  const preflight = useMemo(
+    () => runPreflightCheck(draft ?? {}),
+    [draft?.subject, draft?.preheader, draft?.body]
+  );
 
   const handleAuthSubmit = async () => {
     if (!authEmail.trim() || !authPassword.trim()) {
@@ -715,6 +762,7 @@ export default function Home() {
                   syncError={syncError}
                   syncDays={syncDays}
                   setSyncDays={setSyncDays}
+                  refinementMode={!!draft}
                 />
                 <SuggestionChips
                   selectedSuggestion={selectedSuggestion}
@@ -760,6 +808,8 @@ export default function Home() {
                   directShipLoading={directShipLoading}
                   directShipError={directShipError}
                   directShipSuccess={directShipSuccess}
+                  preflightOk={preflight.ok}
+                  preflightIssues={preflight.issues}
                 />
               </div>
             </div>
@@ -774,6 +824,7 @@ export default function Home() {
               syncError={syncError}
               syncDays={syncDays}
               setSyncDays={setSyncDays}
+              refinementMode={!!draft}
             />
           </>
         )}

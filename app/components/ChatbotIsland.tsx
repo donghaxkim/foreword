@@ -18,6 +18,8 @@ type ChatbotIslandProps = {
   syncError?: string | null;
   syncDays?: number;
   setSyncDays?: (days: number) => void;
+  /** When true, input is used to tweak the current draft (refinement). */
+  refinementMode?: boolean;
 };
 
 const MAX_TEXTAREA_ROWS = 5;
@@ -33,7 +35,8 @@ export function ChatbotIsland({
   syncLoading = false,
   syncError = null,
   syncDays = 7,
-  setSyncDays
+  setSyncDays,
+  refinementMode = false
 }: ChatbotIslandProps) {
   const formRef = useRef<HTMLFormElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -63,15 +66,17 @@ export function ChatbotIsland({
 
   const hasContent = inputValue.trim().length > 0;
 
-  const placeholder = syncLoading
-    ? activeMode === "GitHub"
-      ? "Fetching recent PRs..."
-      : "Fetching Linear tasks..."
-    : activeMode === "GitHub"
-      ? "What should we write? (GitHub data is used as context)"
-      : activeMode === "Linear"
-        ? "What should we write? (Linear data is used as context)"
-        : "Compose your request...";
+  const placeholder = refinementMode
+    ? "Tweak the draft (e.g. make it shorter, emphasize the launch, fix the tone)..."
+    : syncLoading
+      ? activeMode === "GitHub"
+        ? "Fetching recent PRs..."
+        : "Fetching Linear tasks..."
+      : activeMode === "GitHub"
+        ? "What should we write? (GitHub data is used as context)"
+        : activeMode === "Linear"
+          ? "What should we write? (Linear data is used as context)"
+          : "Compose your request...";
 
   const content = (
     <form ref={formRef} onSubmit={handleSubmit} className="mx-auto flex max-w-3xl flex-col gap-3">
