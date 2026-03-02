@@ -12,5 +12,7 @@ export function mapSuggestionToVibe(label: string | null): string {
   const lower = label.toLowerCase();
   if (lower.includes("investor")) return "Investors";
   if (lower.includes("beta") || lower.includes("tester")) return "Beta Testers";
+  // Pass through Loops mailing list names (or any custom name) as-is
+  if (label.trim() && !vibeChips.includes(label as typeof vibeChips[number])) return label.trim();
   return "General";
 }

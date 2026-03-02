@@ -1,16 +1,26 @@
 "use client";
 
 import { vibeChips } from "@/app/lib/constants";
+import type { LoopsList } from "./RecipientSelector";
 
 type SuggestionChipsProps = {
   selectedSuggestion: string | null;
   onSuggestionClick: (label: string) => void;
+  loopsLists?: LoopsList[];
+  listsLoading?: boolean;
 };
 
-export function SuggestionChips({ selectedSuggestion, onSuggestionClick }: SuggestionChipsProps) {
+export function SuggestionChips({ selectedSuggestion, onSuggestionClick, loopsLists, listsLoading }: SuggestionChipsProps) {
+  const chips: string[] =
+    loopsLists && loopsLists.length > 0
+      ? loopsLists.map((l) => l.name)
+      : [...vibeChips];
+
+  if (listsLoading) return null;
+
   return (
     <div className="flex flex-wrap justify-center gap-2">
-      {vibeChips.map((label) => {
+      {chips.map((label) => {
         const isActive = selectedSuggestion === label;
         return (
           <button

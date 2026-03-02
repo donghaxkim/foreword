@@ -452,6 +452,14 @@ export default function Home() {
   const handleSuggestionClick = (label: string) => {
     const isDeselecting = selectedSuggestion === label;
     setSelectedSuggestion(isDeselecting ? null : label);
+
+    // Auto-select the matching Loops list for shipping
+    const matchingList = loopsLists.find((l) => l.name === label);
+    if (matchingList && !isDeselecting) {
+      setSelectedListIds([matchingList.id]);
+    } else if (isDeselecting) {
+      setSelectedListIds(loopsLists.map((l) => l.id));
+    }
   };
 
   const handleCopyHtml = async () => {
@@ -783,6 +791,8 @@ export default function Home() {
                 <SuggestionChips
                   selectedSuggestion={selectedSuggestion}
                   onSuggestionClick={handleSuggestionClick}
+                  loopsLists={loopsLists}
+                  listsLoading={listsLoading}
                 />
               </div>
             </div>
